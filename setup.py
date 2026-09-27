@@ -53,6 +53,14 @@ PLIST = {
         "Twin reads today's and tomorrow's events so it can mention what's coming up. It never changes "
         "your calendar, and nothing leaves your Mac except event titles and times when you chat."
     ),
+    "NSMicrophoneUsageDescription": (
+        "Twin records what you say while you hold the talk key or the mic dot, so it can turn it into text. "
+        "The recording stays on your Mac and is deleted right after it's transcribed."
+    ),
+    "NSSpeechRecognitionUsageDescription": (
+        "Twin turns your voice into text using Apple's on-device Speech framework, right here on your Mac. "
+        "Nothing you say is sent anywhere to do this."
+    ),
 }
 
 OPTIONS = {
@@ -65,6 +73,7 @@ OPTIONS = {
         "imessage_export",
         "nudges",
         "digest",
+        "voice",
         "sms_parser",
         "db",
         "run_pipeline",
@@ -95,6 +104,10 @@ OPTIONS = {
         "Vision",
         "EventKit",
         "ApplicationServices",
+        "Speech",
+        "AVFoundation",
+        "CoreMedia",
+        "CoreAudio",
     ],
     "excludes": [
         "PIL", "streamlit", "pandas", "numpy", "pyarrow", "polars", "matplotlib", "IPython", "pytest",

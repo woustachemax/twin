@@ -58,6 +58,8 @@ This started as a hackathon project. It's about 3,500 lines of Python and meant 
 
 6. **Catch-up.** Ask "what did I miss?" or "catch me up" and Twin counts today's incoming messages by vague topic (plans, payments, travel, appointments, work, deliveries, bank alerts, other) and answers with something like "Today you got a few messages about plans and one message about a payment. Nothing looks urgent." It's built on your Mac from counts only, never quotes a message, and makes no provider request, so it works without an API key.
 
+7. **Voice.** Hold Cmd+Shift+V, or hold the small dot next to the input field, and say something. Twin records while you hold it, turns it into text on-device with Apple's Speech framework, and runs it through the same `submit()` flow as anything you type, so it gets the same scrubbing and the same answer. Replies are read back with macOS's built-in `say`, in a voice and rate that vary a little by persona, unless you turn that off with `/voice off`. The first time you use it, Twin explains what's about to happen before macOS asks for Microphone and Speech Recognition access. If either is denied, Twin says so in the bubble instead of failing silently, and never sends audio or transcribed text anywhere except the same redacted request that already goes to your provider for typed messages.
+
 ## Repository layout
 
 ```
@@ -108,6 +110,7 @@ Python packages:
 
 | Package | Used by | Why |
 |---|---|---|
+| `pyobjc-framework-Speech`, `pyobjc-framework-AVFoundation` | `voice.py` | on-device speech-to-text and microphone recording |
 | `anthropic` | `llm_providers.py` | Anthropic API client. The other providers use plain HTTPS. |
 | `duckdb` | `buddy.py`, `packages/db`, `packages/ui` | local database |
 | `python-dotenv` | `buddy.py` | loads `.env` when running from a terminal |
@@ -128,7 +131,7 @@ cd digital-twin
 python3 -m venv .venv
 source .venv/bin/activate
 
-pip install anthropic duckdb python-dotenv pynput pyobjc-framework-Cocoa pyobjc-framework-Quartz pyobjc-framework-Vision pyobjc-framework-EventKit
+pip install anthropic duckdb python-dotenv pynput pyobjc-framework-Cocoa pyobjc-framework-Quartz pyobjc-framework-Vision pyobjc-framework-EventKit pyobjc-framework-Speech pyobjc-framework-AVFoundation
 pip install streamlit pandas
 ```
 
@@ -186,6 +189,8 @@ Closing the window before finishing quits Twin, and it starts from step 1 next t
 | Change provider or key | `/setup` |
 | Catch up on today's Messages | "what did I miss?", "catch me up" |
 | Ask about your screen | "what am I looking at?", "what's on my screen?" |
+| Talk instead of typing | hold Cmd+Shift+V, or hold the dot by the input field |
+| Turn spoken replies on or off | `/voice on`, `/voice off` |
 
 Twin fills in context on its own. Ask "what should I be doing?" and it may mention your next calendar event. Ask "have I been spending a lot?" and it answers from the vague summary, never with amounts.
 
@@ -265,6 +270,7 @@ The setup window's permissions page lets you grant these up front. When running 
 | Accessibility | the global hotkey (`pynput`) | System Settings > Privacy & Security > Accessibility |
 | Calendars (full access) | reading calendar events | Allow when prompted, or System Settings > Privacy & Security > Calendars |
 | Screen Recording | answering questions about your screen | System Settings > Privacy & Security > Screen & System Audio Recording |
+| Microphone, Speech Recognition | holding Cmd+Shift+V to talk | Allow when prompted, or System Settings > Privacy & Security > Microphone / Speech Recognition |
 
 Twin keeps working without any of them. It says in the widget which feature is off and where to turn it on. Calendar permission requests run in a separate helper process, so the prompt never interrupts the widget.
 

@@ -33,6 +33,7 @@ import imessage_export
 import llm_providers
 import nudges
 import run_pipeline
+import voice
 import screen_reader
 from llm_providers import PROVIDERS, ProviderError
 
@@ -45,6 +46,9 @@ NUDGE_MINUTES = 15
 NUDGED_PATH = CONFIG_PATH.with_name("nudged.json")
 MAX_TOKENS = 1024
 HOTKEY = "<cmd>+<shift>+<space>"
+VOICE_HOTKEY = frozenset({"cmd", "shift", "v"})
+VOICE_HOTKEY_LABEL = "Cmd+Shift+V"
+MAX_RECORD_SECONDS = 30
 HOTKEY_FLAG = "--hotkey-listener"
 CALENDAR_FLAG = "--request-calendar"
 TWIN_DIR = os.path.expanduser("~/.twin")
@@ -276,6 +280,15 @@ ACCESSIBILITY_NOTE = (
     "the Cmd+Shift+Space hotkey needs Accessibility access. allow Twin in System Settings → Privacy & "
     "Security → Accessibility, then restart me."
 )
+VOICE_INTRO_NOTE = (
+    "quick heads up before we try this: holding {hotkey}, or the little dot by the input field, lets you "
+    "talk to me instead of typing. macOS will ask to let me use your microphone and Speech Recognition, just "
+    "once. both stay on your Mac: I turn what you say into text right there, the same way I read what you "
+    "type, and none of it goes anywhere else."
+)
+VOICE_STATUS_NOTE = "voice replies are {state} right now. type /voice on or /voice off to change that."
+VOICE_USAGE_NOTE = "that's /voice on or /voice off."
+VOICE_TOGGLED_NOTE = "voice replies are {state} now."
 LANDING = {
     "bg": "#0E0D12", "bg2": "#16141D", "card": "#1C1A25", "line": "#2C2938", "text": "#F3EEFC",
     "muted": "#A39DB3", "lime": "#C6FF4A", "lime_shade": "#9ED624", "pink": "#FF7AB8", "sky": "#7AD7FF",
@@ -675,6 +688,18 @@ class CalendarCache:
             return self.events, self.error
 
 
+def key_name(key):
+    from pynput import keyboard
+
+    if key in (keyboard.Key.cmd, keyboard.Key.cmd_l, keyboard.Key.cmd_r):
+        return "cmd"
+    if key in (keyboard.Key.shift, keyboard.Key.shift_l, keyboard.Key.shift_r):
+        return "shift"
+    if hasattr(key, "char") and key.char:
+        return key.char.lower()
+    return None
+
+
 def run_hotkey_listener():
     from pynput import keyboard
 
@@ -682,13 +707,39 @@ def run_hotkey_listener():
         sys.stdin.read()
         os._exit(0)
 
-    def fire():
+    def emit(line):
         try:
-            print("toggle", flush=True)
+            print(line, flush=True)
         except BrokenPipeError:
             os._exit(0)
 
+    held = set()
+    mic_active = False
+
+    def on_press(key):
+        nonlocal mic_active
+        name = key_name(key)
+        if name:
+            held.add(name)
+        if not mic_active and VOICE_HOTKEY <= held:
+            mic_active = True
+            emit("mic_down")
+
+    def on_release(key):
+        nonlocal mic_active
+        name = key_name(key)
+        if name:
+            held.discard(name)
+        if mic_active and not VOICE_HOTKEY <= held:
+            mic_active = False
+            emit("mic_up")
+
+    def fire():
+        emit("toggle")
+
     threading.Thread(target=exit_when_parent_goes, daemon=True).start()
+    hold_listener = keyboard.Listener(on_press=on_press, on_release=on_release)
+    hold_listener.start()
     with keyboard.GlobalHotKeys({HOTKEY: fire}) as listener:
         listener.join()
 
@@ -722,8 +773,9 @@ def start_hotkey_listener(events):
 
     def pump():
         for line in process.stdout:
-            if line.strip() == "toggle":
-                events.put("toggle")
+            line = line.strip()
+            if line in ("toggle", "mic_down", "mic_up"):
+                events.put(line)
 
     threading.Thread(target=pump, daemon=True).start()
     return process
@@ -1030,6 +1082,9 @@ class Buddy:
         self.progress_until = 0.0
         self.progress_shown = None
         self.calendar = CalendarCache()
+        self.recording = False
+        self.voice_stop_event = None
+        self.voice_enabled = self.config.get("voice_enabled", True)
         self.sizes = {}
         self.shapes = None
         self.shadow_job = None
@@ -1133,6 +1188,10 @@ class Buddy:
         self.close_mark = self.paint(
             canvas.create_text(0, 0, text="×", font=(self.family, 13), tags=("close",)), fill="muted",
         )
+        self.mic_dot = self.paint(canvas.create_oval(0, 0, 0, 0, outline="", tags=("mic",)), fill="field_edge")
+        self.mic_mark = self.paint(
+            canvas.create_text(0, 0, text="●", font=(self.family, 9), tags=("mic",)), fill="muted",
+        )
         canvas.tag_bind("close", "<Enter>", lambda _e: canvas.itemconfigure(self.close_dot, fill=self.theme["bubble_edge"]))
         canvas.tag_bind("close", "<Leave>", lambda _e: canvas.itemconfigure(self.close_dot, fill=self.theme["bubble"]))
         canvas.tag_bind("close", "<ButtonRelease-1>", lambda _e: self.hide())
@@ -1150,6 +1209,10 @@ class Buddy:
         self.entry = tk.Entry(canvas, bd=0, highlightthickness=0, relief="flat", font=(self.family, 14))
         self.entry_window = canvas.create_window(0, 0, anchor="w", window=self.entry)
         self.enter_mark = self.paint(canvas.create_text(0, 0, text="↵", font=(self.family, 13)), fill="muted")
+        canvas.tag_bind("mic", "<Enter>", lambda _e: self.canvas.itemconfigure(self.mic_dot, fill=self.theme["bubble_edge"]))
+        canvas.tag_bind("mic", "<Leave>", lambda _e: self.canvas.itemconfigure(self.mic_dot, fill=self.theme["field_edge"]) if not self.recording else None)
+        canvas.tag_bind("mic", "<ButtonPress-1>", lambda _e: self.start_recording())
+        canvas.tag_bind("mic", "<ButtonRelease-1>", lambda _e: self.stop_recording())
         for offset in (5, 9, 13):
             self.paint(
                 canvas.create_line(0, 0, 0, 0, width=1, tags=("grip", f"grip_{offset}")), fill="muted",
@@ -1220,7 +1283,10 @@ class Buddy:
         canvas.itemconfigure(self.bubble_window, width=w - 60, height=bubble_bottom - bubble_top - 26)
         field_mid = (field_top + field_bottom) / 2
         canvas.coords(self.entry_window, 30, field_mid)
-        canvas.itemconfigure(self.entry_window, width=w - 80)
+        canvas.itemconfigure(self.entry_window, width=w - 110)
+        mic_x = w - 64
+        canvas.coords(self.mic_dot, mic_x - 12, field_mid - 12, mic_x + 12, field_mid + 12)
+        canvas.coords(self.mic_mark, mic_x, field_mid)
         canvas.coords(self.enter_mark, w - 34, field_mid)
         for offset in (5, 9, 13):
             canvas.coords(f"grip_{offset}", w - 5, h - offset, w - offset, h - 5)
@@ -1721,6 +1787,9 @@ class Buddy:
         if parts[0].lower() == "/setup":
             self.open_setup()
             return True
+        if parts[0].lower() == "/voice":
+            self.handle_voice_command(parts[1:])
+            return True
         if parts[0].lower() != "/persona":
             return False
         names = ", ".join(PERSONAS)
@@ -1734,6 +1803,71 @@ class Buddy:
             self.save_settings()
             self.greet()
         return True
+
+    def handle_voice_command(self, args):
+        if not args:
+            self.speak(VOICE_STATUS_NOTE.format(state="on" if self.voice_enabled else "off"))
+            return
+        choice = args[0].lower()
+        if choice not in ("on", "off"):
+            self.speak(VOICE_USAGE_NOTE)
+            return
+        self.voice_enabled = choice == "on"
+        self.config["voice_enabled"] = self.voice_enabled
+        self.save_settings()
+        if not self.voice_enabled:
+            voice.stop_speaking()
+        self.speak(VOICE_TOGGLED_NOTE.format(state=choice))
+
+    def start_recording(self, _event=None):
+        if self.recording or self.busy or self.onboarding:
+            return
+        self.recording = True
+        self.canvas.itemconfigure(self.mic_dot, fill="#FF4F4F")
+        self.set_status("listening…")
+        self.voice_stop_event = threading.Event()
+        threading.Thread(target=self.voice_session, args=(self.voice_stop_event,), daemon=True).start()
+
+    def stop_recording(self, _event=None):
+        if self.voice_stop_event is not None:
+            self.voice_stop_event.set()
+
+    def voice_session(self, stop_event):
+        try:
+            first_time = not self.config.get("voice_intro_shown")
+            if first_time:
+                self.config["voice_intro_shown"] = True
+                self.save_settings()
+                self.replies.put(
+                    ("notice", self.voice(self.persona, VOICE_INTRO_NOTE.format(hotkey=VOICE_HOTKEY_LABEL)), None),
+                )
+            voice.ensure_access(allow_prompt=True)
+            recorder = voice.Recorder()
+            recorder.start()
+        except voice.VoiceInputError as e:
+            self.replies.put(("voice_error", str(e), None))
+            return
+        except Exception as e:
+            print(f"[buddy] voice recording failed: {e!r}", file=sys.stderr)
+            self.replies.put(("voice_error", voice.RECORD_FAILED_MESSAGE, None))
+            return
+        self.replies.put(("voice_listening", None, None))
+        stop_event.wait(MAX_RECORD_SECONDS)
+        path = recorder.stop()
+        self.replies.put(("voice_transcribing", None, None))
+        try:
+            text = voice.transcribe_file(path)
+        except voice.VoiceInputError as e:
+            self.replies.put(("voice_error", str(e), None))
+            return
+        except Exception as e:
+            print(f"[buddy] transcription failed: {e!r}", file=sys.stderr)
+            self.replies.put(("voice_error", voice.NOTHING_HEARD_MESSAGE, None))
+            return
+        if not text:
+            self.replies.put(("voice_error", voice.NOTHING_HEARD_MESSAGE, None))
+            return
+        self.replies.put(("voice_text", text, None))
 
     def submit(self, _event=None):
         question = "" if self.placeholder else self.entry.get().strip()
@@ -1822,10 +1956,15 @@ class Buddy:
     def poll(self):
         while True:
             try:
-                self.hotkey_events.get_nowait()
+                event = self.hotkey_events.get_nowait()
             except queue.Empty:
                 break
-            self.toggle()
+            if event == "toggle":
+                self.toggle()
+            elif event == "mic_down":
+                self.start_recording()
+            elif event == "mic_up":
+                self.stop_recording()
         while True:
             try:
                 kind, message, status = self.replies.get_nowait()
@@ -1842,10 +1981,32 @@ class Buddy:
                 self.pending_notices.append(self.persona["frame"].format(message=message))
                 if not self.visible:
                     self.peek()
+            elif kind == "voice_listening":
+                self.set_status("listening…")
+            elif kind == "voice_transcribing":
+                self.set_status("making that out…")
+            elif kind == "voice_text":
+                self.recording = False
+                self.canvas.itemconfigure(self.mic_dot, fill=self.theme["field_edge"])
+                self.entry.delete(0, "end")
+                self.placeholder = False
+                self.entry.insert(0, message)
+                self.submit()
+            elif kind == "voice_error":
+                self.recording = False
+                self.canvas.itemconfigure(self.mic_dot, fill=self.theme["field_edge"])
+                self.set_status(self.idle_status())
+                self.notify(message)
             else:
                 self.busy = False
                 menu, self.next_menu = self.next_menu, None
                 self.say(message, typing=True, menu=menu)
+                if kind in ("reply", "reply_error", "reply_screen") and self.voice_enabled:
+                    voice.stop_speaking()
+                    try:
+                        voice.speak(message, self.persona_key)
+                    except voice.VoiceOutputError as e:
+                        print(f"[buddy] voice output failed: {e!r}", file=sys.stderr)
                 if status:
                     self.set_status(status, hold=5.0)
                 else:
@@ -1870,6 +2031,9 @@ class Buddy:
             glow_color = mix(self.theme["glow_dim"], self.theme["glow_bright"], pulse * glow)
             self.canvas.itemconfigure(self.halo, outline=glow_color)
             self.canvas.itemconfigure(self.status_dot, fill=glow_color)
+            if self.recording:
+                mic_pulse = (math.sin(self.phase * 1.6) + 1) / 2
+                self.canvas.itemconfigure(self.mic_dot, fill=mix(self.theme["field_edge"], "#FF4F4F", mic_pulse))
 
             avatar = self.persona["avatar"]
             if avatar in BLINKING_AVATARS:
