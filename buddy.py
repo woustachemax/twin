@@ -16,6 +16,13 @@ import webbrowser
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+# Run as __main__, this module is never importable by its own filename. license_gate.py
+# needs a few UI helpers from here (mix, rounded_rect_items, pick_fonts) without duplicating
+# them, so alias this already-executing module under its real name before anything below
+# gets a chance to import it: this makes `import buddy` resolve to this same running module
+# instead of re-executing the whole file from disk as a second, separate module object.
+sys.modules.setdefault("buddy", sys.modules["__main__"])
+
 import duckdb
 from dotenv import load_dotenv
 
@@ -24,11 +31,14 @@ load_dotenv()
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(BASE_DIR, "packages", "ingest"))
 sys.path.insert(0, os.path.join(BASE_DIR, "packages", "db"))
+sys.path.insert(0, os.path.join(BASE_DIR, "packages", "licensing"))
 sys.path.insert(0, BASE_DIR)
 
 import calendar_reader
 import db
 import digest
+import licensing
+from license_gate import LicenseGate
 import imessage_export
 import llm_providers
 import nudges
@@ -2661,6 +2671,9 @@ class SetupScreen:
             self.root.destroy()
 
 
+TRIAL_ENDING_NOTE = "Heads up: your Twin trial ends in {days} day{plural}. Enter a license key any time from the menu to keep going without a gap."
+
+
 def main():
     if HOTKEY_FLAG in sys.argv:
         setup_logging(child=True)
@@ -2677,8 +2690,9 @@ def main():
     configure_bundled_tcl()
     register_fonts()
     config = load_config()
-    persona_key = resolve_persona_key(config)
-    startup_notice = refresh_activity() if config.get("onboarded") else None
+    config = licensing.ensure_trial_started(config)
+    save_config(config)
+
     hotkey_events = queue.Queue()
     listener = start_hotkey_listener(hotkey_events)
     root = tk.Tk()
@@ -2692,19 +2706,44 @@ def main():
     signal.signal(signal.SIGTERM, shutdown)
     signal.signal(signal.SIGINT, shutdown)
 
-    def start(client, notice=None, fresh=False):
-        current = load_config() if fresh else config
-        buddy = Buddy(root, hotkey_events, resolve_persona_key(current), startup_notice, client, fresh=fresh)
-        if notice:
-            buddy.notify(notice)
-        if not accessibility_trusted():
-            buddy.notify(ACCESSIBILITY_NOTE)
+    license_state = licensing.state(config)
+    if license_state["config_changed"]:
+        config = license_state["config"]
+        save_config(config)
 
-    client = llm_providers.saved_client(config)
-    if client is None or not config.get("onboarded"):
-        SetupScreen(root, config, on_done=lambda c, n: start(c, n, fresh=True), saved=client)
+    def proceed(current_config):
+        persona_key = resolve_persona_key(current_config)
+        startup_notice = refresh_activity() if current_config.get("onboarded") else None
+
+        def start(client, notice=None, fresh=False):
+            current = load_config() if fresh else current_config
+            buddy = Buddy(root, hotkey_events, resolve_persona_key(current), startup_notice, client, fresh=fresh)
+            if notice:
+                buddy.notify(notice)
+            if not accessibility_trusted():
+                buddy.notify(ACCESSIBILITY_NOTE)
+            days = license_state.get("trial_days_left")
+            if license_state["reason"] == "trial" and days is not None and days <= 3:
+                buddy.notify(TRIAL_ENDING_NOTE.format(days=days, plural="" if days == 1 else "s"))
+
+        client = llm_providers.saved_client(current_config)
+        if client is None or not current_config.get("onboarded"):
+            SetupScreen(root, current_config, on_done=lambda c, n: start(c, n, fresh=True), saved=client)
+        else:
+            start(client)
+
+    if not license_state["allowed"]:
+        message = {
+            "trial_expired": f"Your {licensing.TRIAL_DAYS}-day trial has ended. Enter a license key to keep using Twin.",
+            "revoked": "This license key is no longer valid. Enter a different key, or reach out if that's a mistake.",
+            "revalidation_overdue": (
+                "Twin couldn't confirm your license for a while. Reconnect to the internet, or re-enter your key."
+            ),
+        }.get(license_state["reason"], "Enter a license key to continue.")
+        LicenseGate(root, config, save_config, proceed, LANDING).show(message)
     else:
-        start(client)
+        proceed(config)
+
     try:
         root.mainloop()
     finally:
