@@ -31,6 +31,18 @@ def get_connection(db_path: str = DB_PATH) -> duckdb.DuckDBPyConnection:
             data_touched VARCHAR
         )
     """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS documents (
+            id VARCHAR PRIMARY KEY,
+            ingested_at TIMESTAMP,
+            filename VARCHAR,
+            doc_type VARCHAR,
+            extraction_method VARCHAR,
+            content VARCHAR,
+            content_hash VARCHAR,
+            char_count INTEGER
+        )
+    """)
     return con
 
 
@@ -75,6 +87,39 @@ def insert_transaction(
         data_touched=f"transaction {txn_id}: extracted {type} of {amount} from {merchant} (ref {ref_number})",
     )
     return txn_id
+
+
+def document_exists(con, content_hash: str) -> bool:
+    return con.execute(
+        "SELECT 1 FROM documents WHERE content_hash = ? LIMIT 1",
+        [content_hash],
+    ).fetchone() is not None
+
+
+def insert_document(
+    con,
+    filename: str,
+    doc_type: str,
+    extraction_method: str,
+    content: str,
+    content_hash: str,
+    source: str = "document_ingest",
+) -> str:
+    doc_id = str(uuid.uuid4())
+    con.execute(
+        """
+        INSERT INTO documents (id, ingested_at, filename, doc_type, extraction_method, content, content_hash, char_count)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [doc_id, datetime.now(timezone.utc), filename, doc_type, extraction_method, content, content_hash, len(content)],
+    )
+    insert_access_log(
+        con,
+        source=source,
+        action="insert_document",
+        data_touched=f"document {doc_id}: ingested {filename} ({doc_type}, via {extraction_method}, {len(content)} chars)",
+    )
+    return doc_id
 
 
 def get_recent_access_log(con, limit: int = 50):

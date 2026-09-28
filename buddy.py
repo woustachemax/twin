@@ -29,6 +29,7 @@ sys.path.insert(0, BASE_DIR)
 import calendar_reader
 import db
 import digest
+import document_ingest
 import imessage_export
 import llm_providers
 import nudges
@@ -251,6 +252,10 @@ FILING_PROMPT = """Real SEC filing excerpts, fetched just now from SEC EDGAR (th
 {filings}
 
 Summarize what's genuinely in this filing for the user. Always mention the filing type and the date it was filed, and cite the section a claim comes from when you can (for example "in Management's Discussion and Analysis" or "in the Risk Factors section"). If the excerpt doesn't cover something the user asked about, say so honestly instead of guessing."""
+DOCUMENT_PROMPT = """The user asked you to read a document. This is what was actually extracted from it, by OCR or a text layer, and it's already been through redaction, so some things may show up as [email], [phone], or similar placeholders rather than the real value:
+{document}
+
+Answer only from what's actually in this extracted text. Extraction isn't perfect, so treat garbled or nonsensical fragments as noise rather than fact. If something the user's asking about genuinely isn't in there, say so honestly instead of guessing."""
 REASK_NOTE = "just a name is perfect, nothing else needed. what should I call you?"
 PERSONA_MENU_NOTE = (
     "nice to meet you, {name}! one last thing: pick the buddy you'd like to hang out with. you can switch "
@@ -358,6 +363,25 @@ EDGAR_CONTACT_SKIPPED_NOTE = (
 )
 EDGAR_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
+DOCUMENT_ERROR_NOTES = {
+    "not_found": "I couldn't find a file at {path}. Double-check the path and try again.",
+    "unsupported_type": "I can only read PDFs and JPG/PNG photos right now, not {path}.",
+    "unreadable": "I couldn't open {path}. It might be corrupted or password-protected.",
+    "empty": "I read {path} but couldn't find any text in it.",
+    "model_unavailable": "My document reader isn't set up right now. Try again shortly.",
+    "api_error": "Something went wrong reading that document. Try again shortly.",
+}
+DOCUMENT_INGESTED_NOTE = (
+    "Got it — I read {chars} characters from {filename}. Ask me anything about it, and I'll "
+    "answer from what's actually in there. Say /forget when you're done with it."
+)
+DOCUMENT_FORGOTTEN_NOTE = "Forgotten. {filename} is no longer part of our conversation."
+DOCUMENT_NONE_ACTIVE_NOTE = "There's no document loaded right now, so there's nothing to forget."
+INGEST_USAGE_NOTE = (
+    "Usage: /ingest <path> — reads a PDF or a JPG/PNG photo of a receipt or document, so you "
+    "can ask about it. Try: /ingest ~/Downloads/receipt.jpg"
+)
+
 CATEGORIES = [
     ("food and dining", ("swiggy", "zomato", "restaurant", "cafe", "starbucks", "dominos", "pizza", "mcdonald", "kfc", "eatsure")),
     ("groceries", ("bigbasket", "blinkit", "zepto", "instamart", "dmart", "grocery", "jiomart")),
@@ -394,6 +418,7 @@ CALENDAR_LINE_RE = re.compile(r"^- (\d{1,2}:\d{2} [AP]M|all day): (.+)$")
 NOW_LINE_RE = re.compile(r"^It's currently \d{1,2}:\d{2} [AP]M on [A-Z][a-z]+day\.$")
 FLIGHT_LINE_RE = re.compile(r"^✈ ")
 FILING_LINE_RE = re.compile(r"^📄 ")
+DOCUMENT_LINE_RE = re.compile(r"^📎 ")
 CALENDAR_TITLE_LIMIT = 80
 
 
@@ -467,7 +492,11 @@ def vet_context(context):
     return ("\n".join(kept) if kept else NO_ACTIVITY), notes
 
 
-def scrub(text, strict):
+def scrub(text, strict, skip_amounts=False):
+    """skip_amounts=True leaves CURRENCY_RE/ACCOUNT_RE/the generic number pattern alone - used
+    only for ingested document content (document_ingest.py), where a receipt's real total or
+    date is the point of asking, and redact.redact()'s targeted PII categories (below) already
+    run unconditionally regardless of this flag. Nothing else gets this treatment."""
     notes = []
 
     text, pii_found = redact.redact(text)
@@ -484,11 +513,13 @@ def scrub(text, strict):
     if sms_hits:
         text = " ".join("[removed: SMS text]" if s in sms_hits else s for s in sentences)
         notes.append(f"[removed: SMS text] x{len(sms_hits)}")
-    text = apply_pattern(CURRENCY_RE, "[amount]", text)
-    text = apply_pattern(ACCOUNT_RE, "[account]", text)
+    if not skip_amounts:
+        text = apply_pattern(CURRENCY_RE, "[amount]", text)
+        text = apply_pattern(ACCOUNT_RE, "[account]", text)
     text = apply_pattern(HANDLE_RE, "[id]", text)
     text = apply_pattern(MIXED_ID_RE, "[id]", text)
-    text = apply_pattern(ANY_NUMBER_RE if strict else LONG_NUMBER_RE, "[number]", text)
+    if not skip_amounts:
+        text = apply_pattern(ANY_NUMBER_RE if strict else LONG_NUMBER_RE, "[number]", text)
     return text, notes
 
 
@@ -503,6 +534,15 @@ def scrub_system(system):
             continue
         if FILING_LINE_RE.match(line):
             lines.append(line)
+            continue
+        if DOCUMENT_LINE_RE.match(line):
+            # Not a bypass like the two above: this still runs through the full scrub(),
+            # PII categories included - it just skips the currency/account/number patterns
+            # that were built for SMS bank-transaction summaries, so a receipt's real total
+            # or date survives redact.redact()'s targeted PII pass. See scrub()'s docstring.
+            scrubbed, found = scrub(line[len("📎 "):], strict=True, skip_amounts=True)
+            lines.append(f"📎 {scrubbed}")
+            notes += [f"document: {note}" for note in found]
             continue
         match = CALENDAR_LINE_RE.match(line)
         if match:
@@ -543,7 +583,8 @@ def calendar_context(events):
     )
 
 
-def build_request(persona, question, user_name=None, calendar_events=None, screen=None, flights=None, filings=None):
+def build_request(persona, question, user_name=None, calendar_events=None, screen=None, flights=None, filings=None,
+                   documents=None):
     finance, notes = vet_context(build_context())
     now = datetime.now()
     context = CONTEXT_PROMPT.format(
@@ -563,6 +604,12 @@ def build_request(persona, question, user_name=None, calendar_events=None, scree
         request["system"] += "\n\n" + FLIGHT_PROMPT.format(flights=flights)
     if filings:
         request["system"] += "\n\n" + FILING_PROMPT.format(filings=filings)
+    if documents:
+        # documents is already 📎-marked (document_ingest.format_document_context). That marker
+        # routes through scrub_system() to the full scrub()/redact() pass below, PII categories
+        # included - unlike FLIGHT_LINE_RE/FILING_LINE_RE it is not a bypass, since this is the
+        # user's own personal data, not public company data.
+        request["system"] += "\n\n" + DOCUMENT_PROMPT.format(document=documents)
     return request, notes
 
 
@@ -617,8 +664,9 @@ def voice_line(client, persona, message):
     return persona["frame"].format(message=message)
 
 
-def ask_model(client, persona, question, user_name=None, calendar_events=None, screen=None, flights=None, filings=None):
-    request, notes = build_request(persona, question, user_name, calendar_events, screen, flights, filings)
+def ask_model(client, persona, question, user_name=None, calendar_events=None, screen=None, flights=None, filings=None,
+              documents=None):
+    request, notes = build_request(persona, question, user_name, calendar_events, screen, flights, filings, documents)
     try:
         text, refused = send_to_api(client, request, notes)
     except ProviderError as e:
@@ -1129,6 +1177,7 @@ class Buddy:
         self.status_full = ""
         self.pending_notices = []
         self.noticed = set()
+        self.active_document = None
         self.family, self.mono = pick_fonts()
         if fresh:
             try:
@@ -1833,6 +1882,12 @@ class Buddy:
         if parts[0].lower() == "/redact-test":
             self.handle_redact_test_command(text)
             return True
+        if parts[0].lower() == "/ingest":
+            self.handle_ingest_command(text)
+            return True
+        if parts[0].lower() == "/forget":
+            self.handle_forget_command()
+            return True
         if parts[0].lower() != "/persona":
             return False
         names = ", ".join(PERSONAS)
@@ -1869,6 +1924,51 @@ class Buddy:
             return
         redacted, findings = redact.redact(arg)
         self.say(redact.summarize(redacted, findings), typing=True)
+
+    def active_document_context(self):
+        return document_ingest.format_document_context(self.active_document) if self.active_document else None
+
+    def handle_ingest_command(self, text):
+        parts_full = text.split(None, 1)
+        arg = parts_full[1].strip() if len(parts_full) > 1 else ""
+        if not arg:
+            self.say(INGEST_USAGE_NOTE, typing=True)
+            return
+        path = os.path.expanduser(arg)
+        self.busy = True
+        self.say("…")
+        threading.Thread(target=self.run_document_ingest, args=(path,), daemon=True).start()
+
+    def run_document_ingest(self, path):
+        try:
+            result = document_ingest.ingest_document(path)
+            con = db.get_connection()
+            try:
+                if not db.document_exists(con, result["content_hash"]):
+                    db.insert_document(
+                        con, result["filename"], result["doc_type"], result["extraction_method"],
+                        result["content"], result["content_hash"],
+                    )
+            finally:
+                con.close()
+            self.replies.put(("document_ingested", result, None))
+        except document_ingest.DocumentIngestError as e:
+            print(f"[buddy] document ingest failed: {e.kind} ({e.detail})", file=sys.stderr)
+            note = DOCUMENT_ERROR_NOTES.get(e.kind, DOCUMENT_ERROR_NOTES["api_error"]).format(path=path)
+            reply = self.voice(self.persona, note)
+            self.replies.put(("reply_error", reply, self.persona["done"]))
+        except Exception as e:
+            print(f"[buddy] document ingest failed: {e!r}", file=sys.stderr)
+            reply = offline_line(self.persona, "broken", self.client)
+            self.replies.put(("reply_error", reply, self.persona["done"]))
+
+    def handle_forget_command(self):
+        if not self.active_document:
+            self.say(DOCUMENT_NONE_ACTIVE_NOTE, typing=True)
+            return
+        filename = self.active_document["filename"]
+        self.active_document = None
+        self.say(DOCUMENT_FORGOTTEN_NOTE.format(filename=filename), typing=True)
 
     def toggle_recording(self):
         if self.recording:
@@ -2001,7 +2101,8 @@ class Buddy:
         try:
             summary = screen_reader.describe_screen(screen_reader.read_screen(on_captured=reappear), app_name)
             events, error = self.calendar.get()
-            reply, ok = ask_model(self.client, persona, question, user_name, events, screen=summary)
+            reply, ok = ask_model(self.client, persona, question, user_name, events, screen=summary,
+                                  documents=self.active_document_context())
             kind = "reply_screen" if ok else "reply_error"
         except screen_reader.ScreenReadError as e:
             reappear()
@@ -2045,7 +2146,8 @@ class Buddy:
                     flights = travel_search.format_flight_options(
                         options, origin_code, destination_code, depart_date,
                     )
-                    reply, ok = ask_model(self.client, persona, question, user_name, events, flights=flights)
+                    reply, ok = ask_model(self.client, persona, question, user_name, events, flights=flights,
+                                          documents=self.active_document_context())
                     kind = "reply" if ok else "reply_error"
         except travel_search.TravelSearchError as e:
             print(f"[buddy] flight search failed: {e.kind} ({e.detail})", file=sys.stderr)
@@ -2074,7 +2176,8 @@ class Buddy:
             filing = research_search.latest_filing(company["cik"], filing_query["form_type"])
             excerpt = research_search.fetch_filing_excerpt(company["cik"], filing)
             filings = research_search.format_filing_context(company, filing, excerpt)
-            reply, ok = ask_model(self.client, persona, question, user_name, events, filings=filings)
+            reply, ok = ask_model(self.client, persona, question, user_name, events, filings=filings,
+                                  documents=self.active_document_context())
             kind = "reply" if ok else "reply_error"
         except research_search.ResearchSearchError as e:
             if e.kind == "contact_not_configured":
@@ -2105,7 +2208,8 @@ class Buddy:
         error = None
         try:
             events, error = self.calendar.get()
-            reply, ok = ask_model(self.client, persona, question, user_name, events)
+            reply, ok = ask_model(self.client, persona, question, user_name, events,
+                                  documents=self.active_document_context())
             kind = "reply" if ok else "reply_error"
         except Exception as e:
             print(f"[buddy] answer failed: {e!r}", file=sys.stderr)
@@ -2165,6 +2269,14 @@ class Buddy:
                 self.prompt_edgar_contact(
                     lambda email, q=original_question, fq=original_filing_query: self.on_edgar_contact(email, q, fq)
                 )
+            elif kind == "document_ingested":
+                self.busy = False
+                self.active_document = message
+                self.say(
+                    DOCUMENT_INGESTED_NOTE.format(chars=message["char_count"], filename=message["filename"]),
+                    typing=True,
+                )
+                self.set_status(self.idle_status())
             else:
                 self.busy = False
                 menu, self.next_menu = self.next_menu, None
