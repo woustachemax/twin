@@ -2480,12 +2480,12 @@ class EdgarContactPrompt:
 
 
 class SetupScreen:
-    WIDTH = 520
-    HEIGHT = 680
-    NODE_X = (62, 194, 326, 458)
+    WIDTH = 640
+    HEIGHT = 720
+    NODE_X = (62, 234, 406, 578)
     TRACK_Y = 150
-    STATUS_Y = 548
-    BUTTON_Y = 604
+    STATUS_Y = 588
+    BUTTON_Y = 644
     STEPS = ("provider", "name", "buddy", "permissions")
     STEP_LABELS = ("provider", "name", "buddy", "permissions")
 
