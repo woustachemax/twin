@@ -32,6 +32,7 @@ import digest
 import imessage_export
 import llm_providers
 import nudges
+import redact
 import research_search
 import run_pipeline
 import travel_search
@@ -298,6 +299,11 @@ VOICE_INTRO_NOTE = (
 )
 VOICE_STATUS_NOTE = "voice replies are {state} right now. type /voice on or /voice off to change that."
 VOICE_USAGE_NOTE = "that's /voice on or /voice off."
+REDACT_TEST_USAGE_NOTE = (
+    "Usage: /redact-test <text> — shows what would be redacted before anything reaches your "
+    "AI provider, without actually sending it anywhere. Try: /redact-test call me at "
+    "555-123-4567 or email jane@example.com"
+)
 VOICE_TOGGLED_NOTE = "voice replies are {state} now."
 LANDING = {
     "bg": "#0E0D12", "bg2": "#16141D", "card": "#1C1A25", "line": "#2C2938", "text": "#F3EEFC",
@@ -464,7 +470,10 @@ def vet_context(context):
 def scrub(text, strict):
     notes = []
 
-    def redact(pattern, label, value):
+    text, pii_found = redact.redact(text)
+    notes += [f"{finding['category']} x{finding['count']}" for finding in pii_found]
+
+    def apply_pattern(pattern, label, value):
         value, count = pattern.subn(label, value)
         if count:
             notes.append(f"{label} x{count}")
@@ -475,11 +484,11 @@ def scrub(text, strict):
     if sms_hits:
         text = " ".join("[removed: SMS text]" if s in sms_hits else s for s in sentences)
         notes.append(f"[removed: SMS text] x{len(sms_hits)}")
-    text = redact(CURRENCY_RE, "[amount]", text)
-    text = redact(ACCOUNT_RE, "[account]", text)
-    text = redact(HANDLE_RE, "[id]", text)
-    text = redact(MIXED_ID_RE, "[id]", text)
-    text = redact(ANY_NUMBER_RE if strict else LONG_NUMBER_RE, "[number]", text)
+    text = apply_pattern(CURRENCY_RE, "[amount]", text)
+    text = apply_pattern(ACCOUNT_RE, "[account]", text)
+    text = apply_pattern(HANDLE_RE, "[id]", text)
+    text = apply_pattern(MIXED_ID_RE, "[id]", text)
+    text = apply_pattern(ANY_NUMBER_RE if strict else LONG_NUMBER_RE, "[number]", text)
     return text, notes
 
 
@@ -1821,6 +1830,9 @@ class Buddy:
         if parts[0].lower() == "/voice":
             self.handle_voice_command(parts[1:])
             return True
+        if parts[0].lower() == "/redact-test":
+            self.handle_redact_test_command(text)
+            return True
         if parts[0].lower() != "/persona":
             return False
         names = ", ".join(PERSONAS)
@@ -1849,6 +1861,14 @@ class Buddy:
         if not self.voice_enabled:
             voice.stop_speaking()
         self.speak(VOICE_TOGGLED_NOTE.format(state=choice))
+
+    def handle_redact_test_command(self, text):
+        arg = text.split(None, 1)[1] if len(text.split(None, 1)) > 1 else ""
+        if not arg:
+            self.say(REDACT_TEST_USAGE_NOTE, typing=True)
+            return
+        redacted, findings = redact.redact(arg)
+        self.say(redact.summarize(redacted, findings), typing=True)
 
     def toggle_recording(self):
         if self.recording:
