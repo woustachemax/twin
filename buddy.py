@@ -16,8 +16,6 @@ import webbrowser
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-sys.modules.setdefault("buddy", sys.modules["__main__"])
-
 import duckdb
 from dotenv import load_dotenv
 
@@ -26,17 +24,15 @@ load_dotenv()
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(BASE_DIR, "packages", "ingest"))
 sys.path.insert(0, os.path.join(BASE_DIR, "packages", "db"))
-sys.path.insert(0, os.path.join(BASE_DIR, "packages", "licensing"))
 sys.path.insert(0, BASE_DIR)
 
 import calendar_reader
 import db
 import digest
-import licensing
-from license_gate import LicenseGate
 import imessage_export
 import llm_providers
 import nudges
+import research_search
 import run_pipeline
 import travel_search
 import voice
@@ -250,6 +246,10 @@ FLIGHT_PROMPT = """Real flight search results, fetched just now from a live flig
 {flights}
 
 Present exactly these options to the user as a short, easy-to-scan list (one line per flight: airline, times, price, stops). You can add at most one short sentence of your own personality before or after the list, nothing more."""
+FILING_PROMPT = """Real SEC filing excerpts, fetched just now from SEC EDGAR (the public source of company filings). These are the only real facts: never invent, change, or extrapolate beyond what this text actually says, and don't guess at numbers, dates, or events that aren't in it.
+{filings}
+
+Summarize what's genuinely in this filing for the user. Always mention the filing type and the date it was filed, and cite the section a claim comes from when you can (for example "in Management's Discussion and Analysis" or "in the Risk Factors section"). If the excerpt doesn't cover something the user asked about, say so honestly instead of guessing."""
 REASK_NOTE = "just a name is perfect, nothing else needed. what should I call you?"
 PERSONA_MENU_NOTE = (
     "nice to meet you, {name}! one last thing: pick the buddy you'd like to hang out with. you can switch "
@@ -334,6 +334,14 @@ FLIGHT_ERROR_NOTES = {
     "not_found": "That route didn't turn up any flights, even to search. Double-check the cities and try again.",
 }
 
+FILING_ERROR_NOTES = {
+    "not_found": 'I couldn\'t match "{company}" to a public company on file with the SEC. Try the exact company name or its ticker symbol.',
+    "no_filings": "I couldn't find a recent {form} on file for {company}.",
+    "rate_limit": "SEC's filings database is getting hit too fast right now. Try again in a moment.",
+    "offline": "I can't reach SEC's filings database right now. Check your connection and try again.",
+    "api_error": "SEC's filings database had a problem on its end. Try again shortly.",
+}
+
 CATEGORIES = [
     ("food and dining", ("swiggy", "zomato", "restaurant", "cafe", "starbucks", "dominos", "pizza", "mcdonald", "kfc", "eatsure")),
     ("groceries", ("bigbasket", "blinkit", "zepto", "instamart", "dmart", "grocery", "jiomart")),
@@ -369,6 +377,7 @@ ANY_NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)*")
 CALENDAR_LINE_RE = re.compile(r"^- (\d{1,2}:\d{2} [AP]M|all day): (.+)$")
 NOW_LINE_RE = re.compile(r"^It's currently \d{1,2}:\d{2} [AP]M on [A-Z][a-z]+day\.$")
 FLIGHT_LINE_RE = re.compile(r"^✈ ")
+FILING_LINE_RE = re.compile(r"^📄 ")
 CALENDAR_TITLE_LIMIT = 80
 
 
@@ -473,6 +482,9 @@ def scrub_system(system):
         if FLIGHT_LINE_RE.match(line):
             lines.append(line)
             continue
+        if FILING_LINE_RE.match(line):
+            lines.append(line)
+            continue
         match = CALENDAR_LINE_RE.match(line)
         if match:
             title, found = scrub(match.group(2)[:CALENDAR_TITLE_LIMIT], strict=False)
@@ -512,7 +524,7 @@ def calendar_context(events):
     )
 
 
-def build_request(persona, question, user_name=None, calendar_events=None, screen=None, flights=None):
+def build_request(persona, question, user_name=None, calendar_events=None, screen=None, flights=None, filings=None):
     finance, notes = vet_context(build_context())
     now = datetime.now()
     context = CONTEXT_PROMPT.format(
@@ -530,6 +542,8 @@ def build_request(persona, question, user_name=None, calendar_events=None, scree
         request["system"] += "\n\n" + SCREEN_PROMPT.format(screen=screen)
     if flights:
         request["system"] += "\n\n" + FLIGHT_PROMPT.format(flights=flights)
+    if filings:
+        request["system"] += "\n\n" + FILING_PROMPT.format(filings=filings)
     return request, notes
 
 
@@ -584,8 +598,8 @@ def voice_line(client, persona, message):
     return persona["frame"].format(message=message)
 
 
-def ask_model(client, persona, question, user_name=None, calendar_events=None, screen=None, flights=None):
-    request, notes = build_request(persona, question, user_name, calendar_events, screen, flights)
+def ask_model(client, persona, question, user_name=None, calendar_events=None, screen=None, flights=None, filings=None):
+    request, notes = build_request(persona, question, user_name, calendar_events, screen, flights, filings)
     try:
         text, refused = send_to_api(client, request, notes)
     except ProviderError as e:
@@ -1916,6 +1930,10 @@ class Buddy:
         if flight_query:
             self.search_flights(question, flight_query)
             return "break"
+        filing_query = research_search.parse_filing_query(question)
+        if filing_query:
+            self.search_filings(question, filing_query)
+            return "break"
         self.busy = True
         self.say("…")
         threading.Thread(
@@ -2002,6 +2020,37 @@ class Buddy:
             reply, kind = self.voice(persona, note), "reply_error"
         except Exception as e:
             print(f"[buddy] flight search failed: {e!r}", file=sys.stderr)
+            reply, kind = offline_line(persona, "broken", self.client), "reply_error"
+        self.replies.put((kind, reply, persona["done"]))
+        if error:
+            self.replies.put(("raw_notice", error, None))
+
+    def search_filings(self, question, filing_query):
+        self.busy = True
+        self.say("…")
+        threading.Thread(
+            target=self.run_filing_search, args=(self.persona, question, self.user_name, filing_query),
+            daemon=True,
+        ).start()
+
+    def run_filing_search(self, persona, question, user_name, filing_query):
+        error = None
+        try:
+            events, error = self.calendar.get()
+            company = research_search.resolve_company(filing_query["company_text"])
+            filing = research_search.latest_filing(company["cik"], filing_query["form_type"])
+            excerpt = research_search.fetch_filing_excerpt(company["cik"], filing)
+            filings = research_search.format_filing_context(company, filing, excerpt)
+            reply, ok = ask_model(self.client, persona, question, user_name, events, filings=filings)
+            kind = "reply" if ok else "reply_error"
+        except research_search.ResearchSearchError as e:
+            print(f"[buddy] filing search failed: {e.kind} ({e.detail})", file=sys.stderr)
+            note = FILING_ERROR_NOTES.get(e.kind, FILING_ERROR_NOTES["api_error"]).format(
+                company=filing_query["company_text"], form=filing_query["form_type"],
+            )
+            reply, kind = self.voice(persona, note), "reply_error"
+        except Exception as e:
+            print(f"[buddy] filing search failed: {e!r}", file=sys.stderr)
             reply, kind = offline_line(persona, "broken", self.client), "reply_error"
         self.replies.put((kind, reply, persona["done"]))
         if error:
@@ -2747,9 +2796,6 @@ class SetupScreen:
             self.root.destroy()
 
 
-TRIAL_ENDING_NOTE = "Heads up: your Twin trial ends in {days} day{plural}. Enter a license key any time from the menu to keep going without a gap."
-
-
 def main():
     if HOTKEY_FLAG in sys.argv:
         setup_logging(child=True)
@@ -2766,8 +2812,6 @@ def main():
     configure_bundled_tcl()
     register_fonts()
     config = load_config()
-    config = licensing.ensure_trial_started(config)
-    save_config(config)
 
     hotkey_events = queue.Queue()
     listener = start_hotkey_listener(hotkey_events)
@@ -2782,11 +2826,6 @@ def main():
     signal.signal(signal.SIGTERM, shutdown)
     signal.signal(signal.SIGINT, shutdown)
 
-    license_state = licensing.state(config)
-    if license_state["config_changed"]:
-        config = license_state["config"]
-        save_config(config)
-
     def proceed(current_config):
         persona_key = resolve_persona_key(current_config)
         startup_notice = refresh_activity() if current_config.get("onboarded") else None
@@ -2798,9 +2837,6 @@ def main():
                 buddy.notify(notice)
             if not accessibility_trusted():
                 buddy.notify(ACCESSIBILITY_NOTE)
-            days = license_state.get("trial_days_left")
-            if license_state["reason"] == "trial" and days is not None and days <= 3:
-                buddy.notify(TRIAL_ENDING_NOTE.format(days=days, plural="" if days == 1 else "s"))
 
         client = llm_providers.saved_client(current_config)
         if client is None or not current_config.get("onboarded"):
@@ -2808,17 +2844,7 @@ def main():
         else:
             start(client)
 
-    if not license_state["allowed"]:
-        message = {
-            "trial_expired": f"Your {licensing.TRIAL_DAYS}-day trial has ended. Enter a license key to keep using Twin.",
-            "revoked": "This license key is no longer valid. Enter a different key, or reach out if that's a mistake.",
-            "revalidation_overdue": (
-                "Twin couldn't confirm your license for a while. Reconnect to the internet, or re-enter your key."
-            ),
-        }.get(license_state["reason"], "Enter a license key to continue.")
-        LicenseGate(root, config, save_config, proceed, LANDING).show(message)
-    else:
-        proceed(config)
+    proceed(config)
 
     try:
         root.mainloop()

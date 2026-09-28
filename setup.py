@@ -8,7 +8,7 @@ from setuptools import setup
 sys.setrecursionlimit(20000)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-for package in ("ingest", "parse", "db", "licensing"):
+for package in ("ingest", "parse", "db"):
     sys.path.insert(0, os.path.join(BASE_DIR, "packages", package))
 
 if not hasattr(zlib, "__file__"):
@@ -78,8 +78,6 @@ OPTIONS = {
         "db",
         "run_pipeline",
         "llm_providers",
-        "licensing",
-        "license_gate",
         "sqlite3",
         "tkinter",
         "tkinter.font",
