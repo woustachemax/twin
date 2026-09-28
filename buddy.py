@@ -46,9 +46,8 @@ NUDGE_MINUTES = 15
 NUDGED_PATH = CONFIG_PATH.with_name("nudged.json")
 MAX_TOKENS = 1024
 HOTKEY = "<cmd>+<shift>+<space>"
-VOICE_HOTKEY = frozenset({"cmd", "shift", "v"})
+VOICE_HOTKEY = "<cmd>+<shift>+v"
 VOICE_HOTKEY_LABEL = "Cmd+Shift+V"
-MAX_RECORD_SECONDS = 30
 HOTKEY_FLAG = "--hotkey-listener"
 CALENDAR_FLAG = "--request-calendar"
 TWIN_DIR = os.path.expanduser("~/.twin")
@@ -281,10 +280,10 @@ ACCESSIBILITY_NOTE = (
     "Security → Accessibility, then restart me."
 )
 VOICE_INTRO_NOTE = (
-    "quick heads up before we try this: holding {hotkey}, or the little dot by the input field, lets you "
-    "talk to me instead of typing. macOS will ask to let me use your microphone and Speech Recognition, just "
-    "once. both stay on your Mac: I turn what you say into text right there, the same way I read what you "
-    "type, and none of it goes anywhere else."
+    "quick heads up before we try this: you can just say \"hi {name}\" any time and I'll listen for what "
+    "comes next, or tap {hotkey}, or the little dot by the input field, if you'd rather start by hand. macOS "
+    "will ask to let me use your microphone and Speech Recognition, just once. both stay on your Mac: I turn "
+    "what you say into text right there, the same way I read what you type, and none of it goes anywhere else."
 )
 VOICE_STATUS_NOTE = "voice replies are {state} right now. type /voice on or /voice off to change that."
 VOICE_USAGE_NOTE = "that's /voice on or /voice off."
@@ -688,18 +687,6 @@ class CalendarCache:
             return self.events, self.error
 
 
-def key_name(key):
-    from pynput import keyboard
-
-    if key in (keyboard.Key.cmd, keyboard.Key.cmd_l, keyboard.Key.cmd_r):
-        return "cmd"
-    if key in (keyboard.Key.shift, keyboard.Key.shift_l, keyboard.Key.shift_r):
-        return "shift"
-    if hasattr(key, "char") and key.char:
-        return key.char.lower()
-    return None
-
-
 def run_hotkey_listener():
     from pynput import keyboard
 
@@ -713,34 +700,9 @@ def run_hotkey_listener():
         except BrokenPipeError:
             os._exit(0)
 
-    held = set()
-    mic_active = False
-
-    def on_press(key):
-        nonlocal mic_active
-        name = key_name(key)
-        if name:
-            held.add(name)
-        if not mic_active and VOICE_HOTKEY <= held:
-            mic_active = True
-            emit("mic_down")
-
-    def on_release(key):
-        nonlocal mic_active
-        name = key_name(key)
-        if name:
-            held.discard(name)
-        if mic_active and not VOICE_HOTKEY <= held:
-            mic_active = False
-            emit("mic_up")
-
-    def fire():
-        emit("toggle")
-
     threading.Thread(target=exit_when_parent_goes, daemon=True).start()
-    hold_listener = keyboard.Listener(on_press=on_press, on_release=on_release)
-    hold_listener.start()
-    with keyboard.GlobalHotKeys({HOTKEY: fire}) as listener:
+    combos = {HOTKEY: lambda: emit("toggle"), VOICE_HOTKEY: lambda: emit("mic_tap")}
+    with keyboard.GlobalHotKeys(combos) as listener:
         listener.join()
 
 
@@ -774,7 +736,7 @@ def start_hotkey_listener(events):
     def pump():
         for line in process.stdout:
             line = line.strip()
-            if line in ("toggle", "mic_down", "mic_up"):
+            if line in ("toggle", "mic_tap"):
                 events.put(line)
 
     threading.Thread(target=pump, daemon=True).start()
@@ -1085,6 +1047,14 @@ class Buddy:
         self.recording = False
         self.voice_stop_event = None
         self.voice_enabled = self.config.get("voice_enabled", True)
+        self.voice_proc = None
+        self.wake_listener = voice.WakeWordListener(
+            get_pattern=lambda: voice.wake_pattern(self.persona["name"]),
+            on_wake=lambda: self.replies.put(("wake", None, None)),
+            on_error=lambda message: print(f"[buddy] wake-word listening failed: {message}", file=sys.stderr),
+        )
+        self.wake_paused = False
+        self.wake_listener.start()
         self.sizes = {}
         self.shapes = None
         self.shadow_job = None
@@ -1211,8 +1181,7 @@ class Buddy:
         self.enter_mark = self.paint(canvas.create_text(0, 0, text="↵", font=(self.family, 13)), fill="muted")
         canvas.tag_bind("mic", "<Enter>", lambda _e: self.canvas.itemconfigure(self.mic_dot, fill=self.theme["bubble_edge"]))
         canvas.tag_bind("mic", "<Leave>", lambda _e: self.canvas.itemconfigure(self.mic_dot, fill=self.theme["field_edge"]) if not self.recording else None)
-        canvas.tag_bind("mic", "<ButtonPress-1>", lambda _e: self.start_recording())
-        canvas.tag_bind("mic", "<ButtonRelease-1>", lambda _e: self.stop_recording())
+        canvas.tag_bind("mic", "<ButtonRelease-1>", lambda _e: self.toggle_recording())
         for offset in (5, 9, 13):
             self.paint(
                 canvas.create_line(0, 0, 0, 0, width=1, tags=("grip", f"grip_{offset}")), fill="muted",
@@ -1819,10 +1788,26 @@ class Buddy:
             voice.stop_speaking()
         self.speak(VOICE_TOGGLED_NOTE.format(state=choice))
 
+    def toggle_recording(self):
+        if self.recording:
+            self.stop_recording()
+        else:
+            self.start_recording()
+
+    def on_wake_heard(self):
+        if self.recording or self.busy or self.onboarding:
+            return
+        if not self.visible:
+            self.peek()
+        self.start_recording()
+
     def start_recording(self, _event=None):
         if self.recording or self.busy or self.onboarding:
             return
         self.recording = True
+        if not self.wake_paused:
+            self.wake_paused = True
+            self.wake_listener.pause()
         self.canvas.itemconfigure(self.mic_dot, fill="#FF4F4F")
         self.set_status("listening…")
         self.voice_stop_event = threading.Event()
@@ -1838,9 +1823,8 @@ class Buddy:
             if first_time:
                 self.config["voice_intro_shown"] = True
                 self.save_settings()
-                self.replies.put(
-                    ("notice", self.voice(self.persona, VOICE_INTRO_NOTE.format(hotkey=VOICE_HOTKEY_LABEL)), None),
-                )
+                intro = VOICE_INTRO_NOTE.format(hotkey=VOICE_HOTKEY_LABEL, name=self.persona["name"])
+                self.replies.put(("notice", self.voice(self.persona, intro), None))
             voice.ensure_access(allow_prompt=True)
             recorder = voice.Recorder()
             recorder.start()
@@ -1852,7 +1836,7 @@ class Buddy:
             self.replies.put(("voice_error", voice.RECORD_FAILED_MESSAGE, None))
             return
         self.replies.put(("voice_listening", None, None))
-        stop_event.wait(MAX_RECORD_SECONDS)
+        recorder.wait_for_silence(stop_event)
         path = recorder.stop()
         self.replies.put(("voice_transcribing", None, None))
         try:
@@ -1961,10 +1945,8 @@ class Buddy:
                 break
             if event == "toggle":
                 self.toggle()
-            elif event == "mic_down":
-                self.start_recording()
-            elif event == "mic_up":
-                self.stop_recording()
+            elif event == "mic_tap":
+                self.toggle_recording()
         while True:
             try:
                 kind, message, status = self.replies.get_nowait()
@@ -1981,6 +1963,8 @@ class Buddy:
                 self.pending_notices.append(self.persona["frame"].format(message=message))
                 if not self.visible:
                     self.peek()
+            elif kind == "wake":
+                self.on_wake_heard()
             elif kind == "voice_listening":
                 self.set_status("listening…")
             elif kind == "voice_transcribing":
@@ -2004,7 +1988,7 @@ class Buddy:
                 if kind in ("reply", "reply_error", "reply_screen") and self.voice_enabled:
                     voice.stop_speaking()
                     try:
-                        voice.speak(message, self.persona_key)
+                        self.voice_proc = voice.speak(message, self.persona_key)
                     except voice.VoiceOutputError as e:
                         print(f"[buddy] voice output failed: {e!r}", file=sys.stderr)
                 if status:
@@ -2016,6 +2000,13 @@ class Buddy:
             for notice in self.pending_notices:
                 self.append(f"\n\n{notice}")
             self.pending_notices = []
+
+        speaking = self.voice_proc is not None and self.voice_proc.poll() is None
+        should_pause = self.recording or self.busy or self.onboarding or speaking
+        if should_pause != self.wake_paused:
+            self.wake_paused = should_pause
+            self.wake_listener.pause() if should_pause else self.wake_listener.resume()
+        self.wake_listener.tick()
         self.root.after(100, self.poll)
 
     def animate(self):
