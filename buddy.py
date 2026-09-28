@@ -262,9 +262,10 @@ DB_FAILED_NOTE = (
     "try again next time I start. you can press Cmd+Shift+Space anytime to show or hide me."
 )
 REFRESH_PERMISSION_NOTE = (
-    "I couldn't read your Messages to refresh your recent activity. Give your terminal Full Disk Access in "
+    "I couldn't read your Messages to refresh your recent activity. Give Twin Full Disk Access in "
     "System Settings → Privacy & Security → Full Disk Access, then restart me."
 )
+FDA_SETTINGS_MENU = [("open_fda_settings", "→", "#C6FF4A", "Open System Settings", "Grant Full Disk Access")]
 REFRESH_BUSY_NOTE = (
     "I couldn't refresh your recent activity because your local database was busy, maybe the dashboard has "
     "it open. I'll try again next time I start."
@@ -1508,7 +1509,9 @@ class Buddy:
     def pick_from_menu(self, key):
         if self.busy:
             return
-        if self.onboarding_step == "persona":
+        if key == "open_fda_settings":
+            request_permission("messages", "denied")
+        elif self.onboarding_step == "persona":
             self.handle_onboarding(key)
         elif key in PERSONAS:
             self.run_command(f"/persona {key}")
@@ -1658,8 +1661,9 @@ class Buddy:
             return
         self.noticed.add(message)
         persona = self.persona
+        menu = FDA_SETTINGS_MENU if message == REFRESH_PERMISSION_NOTE else None
         threading.Thread(
-            target=lambda: self.replies.put(("notice", self.voice(persona, message), None)), daemon=True,
+            target=lambda: self.replies.put(("notice", self.voice(persona, message), menu)), daemon=True,
         ).start()
 
     def idle_status(self):
@@ -1958,9 +1962,9 @@ class Buddy:
             elif kind == "raw_notice":
                 self.notify(message)
             elif kind == "notice":
-                self.pending_notices.append(message)
+                self.pending_notices.append((message, status))
             elif kind == "nudge":
-                self.pending_notices.append(self.persona["frame"].format(message=message))
+                self.pending_notices.append((self.persona["frame"].format(message=message), None))
                 if not self.visible:
                     self.peek()
             elif kind == "wake":
@@ -1997,8 +2001,11 @@ class Buddy:
                     self.set_status(self.idle_status())
 
         if self.pending_notices and self.typing_job is None and not self.busy:
-            for notice in self.pending_notices:
+            for notice, menu in self.pending_notices:
                 self.append(f"\n\n{notice}")
+                if menu:
+                    self.menu_after_typing = menu
+                    self.render_menu()
             self.pending_notices = []
 
         speaking = self.voice_proc is not None and self.voice_proc.poll() is None
