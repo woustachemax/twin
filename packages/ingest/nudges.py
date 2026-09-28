@@ -18,7 +18,6 @@ TOPICS = {
         r"\b(?:dinner|lunch|brunch|party|birthday|wedding|gift|cake|reservation|drinks|concert|movie)\b", re.I),
 }
 
-# Checked in order: the first cue that matches is the only thing the nudge says about the message.
 CUES = (
     ("change", re.compile(r"\b(?:cancel(?:l?ed)?|resched\w*|postpon\w*|delay(?:ed)?|moved|running late|no longer)\b", re.I)),
     ("payment", re.compile(

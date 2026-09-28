@@ -1,5 +1,6 @@
 .env
 twin.duckdb
+packages/licensing/_secret.py
 __pycache__/
 packages/*/__pycache__/
 landing/node_modules/

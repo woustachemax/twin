@@ -49,7 +49,7 @@ class LicenseGate:
         win.title("Twin")
         win.configure(bg=c["bg"])
         win.resizable(False, False)
-        win.protocol("WM_DELETE_WINDOW", lambda: None)  # only Activate/quit-app get out of here
+        win.protocol("WM_DELETE_WINDOW", lambda: None)
 
         canvas = tk.Canvas(win, width=WIDTH, height=HEIGHT, bg=c["bg"], highlightthickness=0, bd=0)
         canvas.pack()

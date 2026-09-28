@@ -23,8 +23,6 @@ MAX_RESULTS = 5
 
 WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 
-# Cities the app's own finance categories already lean toward (Swiggy/IRCTC/MakeMyTrip etc. suggest an
-# Indian user base), kept as a fast local fallback so the common cases don't need an extra API round trip.
 FALLBACK_PLACES = {
     "goa": "GOI", "mumbai": "BOM", "bombay": "BOM", "delhi": "DEL", "new delhi": "DEL",
     "bengaluru": "BLR", "bangalore": "BLR", "chennai": "MAA", "hyderabad": "HYD", "kolkata": "CCU",

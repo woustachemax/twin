@@ -16,13 +16,10 @@ REVALIDATE_INTERVAL_SECONDS = 7 * 24 * 3600
 OFFLINE_GRACE_SECONDS = 14 * 24 * 3600
 REQUEST_TIMEOUT = 10
 
-# This is not a real secret: it's baked into a distributed binary, so anyone who
-# decompiles the .app can read it. Its only job is to stop a config.json opened in a
-# text editor from trivially resetting the trial clock or writing "status: licensed"
-# by hand. Real anti-piracy would need server-side validation on every launch, which
-# is more than a solo dev's v1 needs. Generate your own random value before shipping,
-# don't reuse this one.
-SIGNING_SECRET = b"0d93219618a2155c836b505567e883412e7fbc915e6fd970877d0e39b549831b"
+try:
+    from _secret import SIGNING_SECRET
+except ImportError:
+    SIGNING_SECRET = b"fake-dev-signing-secret-not-for-production-use"
 
 
 class LicenseError(Exception):
@@ -181,5 +178,5 @@ if __name__ == "__main__":
     cfg["license"]["data"]["trial_started_at"] = time.time() - (TRIAL_DAYS + 1) * 86400
     cfg["license"] = _stamp(cfg["license"]["data"])
     print("after trial window:", state(cfg))
-    cfg["license"]["data"]["trial_started_at"] += 3600  # tamper without re-signing
+    cfg["license"]["data"]["trial_started_at"] += 3600
     print("tampered (should re-start trial, not grant time back):", state(cfg))

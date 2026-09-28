@@ -1,7 +1,6 @@
 import re
 from datetime import datetime
 
-# Checked in order: a message counts toward the first topic that matches, so counts never double up.
 TOPICS = (
     ("payments", re.compile(
         r"\b(?:deposit|pay|paid|payment|advance|fees?|invoice|owe|dues?|transfer|split|venmo|upi|rent)\b", re.I)),

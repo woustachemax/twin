@@ -16,11 +16,6 @@ import webbrowser
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-# Run as __main__, this module is never importable by its own filename. license_gate.py
-# needs a few UI helpers from here (mix, rounded_rect_items, pick_fonts) without duplicating
-# them, so alias this already-executing module under its real name before anything below
-# gets a chance to import it: this makes `import buddy` resolve to this same running module
-# instead of re-executing the whole file from disk as a second, separate module object.
 sys.modules.setdefault("buddy", sys.modules["__main__"])
 
 import duckdb
@@ -476,8 +471,6 @@ def scrub_system(system):
             lines.append(line)
             continue
         if FLIGHT_LINE_RE.match(line):
-            # Real prices/times fetched from the flights API on purpose; the redaction rules below
-            # exist for possibly-sensitive text elsewhere and would gut this line to "[amount]"/"[number]".
             lines.append(line)
             continue
         match = CALENDAR_LINE_RE.match(line)

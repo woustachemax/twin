@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Twin</title>
-<meta name="description" content="Twin is a local-first AI buddy that floats on your Mac desktop, remembers your activity on-device with DuckDB, and chats with you on a hotkey.">
+<meta name="description" content="Twin is a local-first AI buddy that floats on your Mac desktop: it remembers your day, catches you up on your texts, talks back by voice, and nudges you before you forget, all on-device with DuckDB. No cloud, no accounts.">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cellipse cx='32' cy='33' rx='29' ry='27' fill='%23c6ff4a'/%3E%3Crect x='20' y='20' width='7' height='13' rx='3.5' fill='%23111'/%3E%3Crect x='37' y='20' width='7' height='13' rx='3.5' fill='%23111'/%3E%3Cellipse cx='15' cy='38' rx='5' ry='3' fill='%23ff7ab8'/%3E%3Cellipse cx='49' cy='38' rx='5' ry='3' fill='%23ff7ab8'/%3E%3Cpath d='M27 39 Q32 45 37 39' fill='none' stroke='%23111' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -83,17 +83,18 @@ nav {
   height: 7px;
   border-radius: 3px;
   background: var(--bg);
+  animation: blink 4.5s infinite;
 }
 
 .logo-dot::before { left: 7px; }
 .logo-dot::after { right: 7px; }
 
 .nav-links { display: flex; gap: 22px; align-items: center; font-size: 15px; }
-.nav-links a { text-decoration: none; color: var(--muted); }
-.nav-links a:hover { color: var(--text); }
+.nav-links a { text-decoration: none; color: var(--muted); transition: color 0.15s ease; }
+.nav-links a:not(.gh-btn):hover { color: var(--lime); }
 
 .gh-btn {
-  border: 1.5px solid var(--line);
+  border: 1.5px dashed var(--line);
   padding: 7px 14px;
   border-radius: 999px;
   color: var(--text) !important;
@@ -374,40 +375,53 @@ h2 {
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: 26px;
+  padding: 20px 24px;
   font-family: var(--mono);
-  font-size: 14px;
+  font-size: 13px;
 }
 
 .flow-row {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 14px 0;
+  gap: 10px;
+  padding: 9px 8px;
+  margin: 0 -8px;
   border-bottom: 1px dashed var(--line);
+  border-radius: 10px;
+  transition: background-color 0.15s ease, transform 0.15s ease;
 }
 
 .flow-row:last-child { border-bottom: none; }
 
-.flow-icon {
-  flex: none;
-  width: 38px;
-  height: 38px;
-  border-radius: 12px;
-  display: grid;
-  place-items: center;
-  font-size: 18px;
+.flow-row:hover {
+  background-color: #ffffff0a;
+  transform: translateX(2px);
 }
 
+.flow-icon {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  font-size: 15px;
+  transition: transform 0.15s ease;
+}
+
+.flow-row:hover .flow-icon { transform: scale(1.1) rotate(-4deg); }
+
 .flow-row .label { flex: 1; }
-.flow-row .label small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
 
 .tag {
   font-size: 11px;
   padding: 3px 9px;
   border-radius: 999px;
   white-space: nowrap;
+  transition: transform 0.15s ease;
 }
+
+.flow-row:hover .tag { transform: scale(1.06); }
 
 .tag.stay { background: #c6ff4a22; color: var(--lime); }
 .tag.go { background: #7ad7ff22; color: var(--sky); }
@@ -445,9 +459,8 @@ h2 {
 }
 
 .f-hotkey { grid-column: span 4; }
-.f-memory { grid-column: span 2; grid-row: span 2; display: flex; flex-direction: column; }
 .f-weird, .f-source { grid-column: span 2; }
-.f-screen, .f-providers { grid-column: span 3; }
+.f-screen, .f-providers { grid-column: span 2; }
 
 .art {
   height: 160px;
@@ -457,8 +470,6 @@ h2 {
   border: 1px dashed color-mix(in srgb, var(--accent) 28%, transparent);
   overflow: hidden;
 }
-
-.f-memory .art { flex: 1; min-height: 240px; }
 
 .art svg { width: 100%; height: 100%; display: block; }
 .art svg * { transform-box: fill-box; transform-origin: center; }
@@ -488,8 +499,6 @@ h2 {
 .db-ring { fill: none; stroke: var(--sky); stroke-opacity: 0.45; stroke-width: 2; }
 .lid { fill: var(--sky); stroke: var(--sky); stroke-width: 2; animation: lid 1.4s ease-in-out infinite; }
 .duck { transform-origin: 50% 100%; animation: duck 1.6s ease-in-out infinite alternate; }
-.f-memory:hover .duck { animation-duration: 0.35s; }
-.f-memory:hover .drop { animation-duration: 1.4s; }
 .caption { font-family: var(--mono); font-size: 11px; fill: var(--muted); text-anchor: middle; }
 
 .wob { animation: wob 2.6s ease-in-out infinite; }
@@ -930,7 +939,6 @@ footer .made {
   .features > .feature { grid-column: auto; grid-row: auto; }
   .persona-grid { grid-template-columns: repeat(2, 1fr); }
   .p-twin .p-art { height: 150px; }
-  .f-memory .art { min-height: 200px; }
   .nav-links a:not(.gh-btn) { display: none; }
   section { padding: 56px 0; }
   .dl-card { flex-direction: column; align-items: flex-start; }
@@ -957,8 +965,8 @@ footer .made {
   <nav>
     <a href="#" class="logo"><span class="logo-dot"></span>twin</a>
     <div class="nav-links">
-      <a href="#local">why local</a>
-      <a href="#features">stuff it does</a>
+      <a href="#day">a day with twin</a>
+      <a href="#features">more stuff</a>
       <a href="#personas">personas</a>
       <a href="#get">download</a>
       <a class="gh-btn" href="https://github.com/woustachemax/digital-twin">★ github</a>
@@ -996,40 +1004,55 @@ footer .made {
   </header>
 </div>
 
-<section id="local">
+<section id="day">
   <div class="wrap local-grid">
     <div>
-      <p class="eyebrow">why local</p>
-      <h2>your stuff stays on your laptop.</h2>
-      <p class="lede">Twin keeps everything it knows about you in a DuckDB file at <code>~/.twin/twin.duckdb</code>, right on your Mac. No accounts, no sync, no cloud database, no analytics. Twin has no server of its own, so there's nowhere for your data to go.</p>
-      <p class="lede yours">Twin is a real app anyone can install, not somebody's personal script. Everyone who installs it gets <b>their own brand-new twin.duckdb</b>, created on their Mac the first time they run Twin. Nothing is shared, synced, or pooled between users, so your data never mixes with anyone else's, and the database itself never leaves your machine.</p>
-      <p class="fineprint">What leaves your Mac: when you chat, one request goes straight to the AI provider you picked (Anthropic, OpenAI, Google or xAI) with your message, your name, the current time, today's calendar event titles and times, and a fuzzy spending summary like "spent money on food earlier this week". Amounts, balances, account numbers, merchants and raw SMS never leave, and Twin scrubs every request before it's sent. Ask about your screen and only a one-line description goes along. The screenshot itself is deleted on your Mac right away.</p>
+      <p class="eyebrow">a day with twin</p>
+      <h2>you've met the other kind of assistant.</h2>
+      <p class="lede">The kind that needs your calendar and texts to be useful, then ships all of it to a server you'll never see. Twin skips that trade, keeping everything in a DuckDB file at <code>~/.twin/twin.duckdb</code>, right on your Mac. No accounts, no sync, no cloud database. Here's an ordinary Tuesday with it, and exactly what does or doesn't leave your laptop.</p>
+      <p class="lede yours">Everyone who installs Twin gets <b>their own brand-new twin.duckdb</b>, created on their Mac the first time they run it. Nothing is shared, synced, or pooled between users, and the database itself never leaves your machine.</p>
+      <p class="fineprint">Voice, the digest and nudges never touch an AI provider at all, they're built and matched entirely on your Mac. When you chat, one request goes to the provider you picked with your message, your name, the current time, today's event titles, and a fuzzy summary like "spent money on food earlier this week". Amounts, balances, account numbers and raw SMS never leave.</p>
     </div>
 
     <div class="flow">
       <div class="flow-row">
-        <div class="flow-icon" style="background:#c6ff4a22">🦆</div>
-        <div class="label">twin.duckdb<small>your transactions, on disk, on-device</small></div>
+        <div class="flow-icon" style="background:#7ad7ff22">🦆</div>
+        <div class="label">7:41am · pulls bank texts and today's calendar into twin.duckdb</div>
         <span class="tag stay">stays home</span>
       </div>
       <div class="flow-row">
+        <div class="flow-icon" style="background:#c6ff4a22">🗒️</div>
+        <div class="label">12:30pm · "what did I miss?" counts texts by topic</div>
+        <span class="tag stay">no API key</span>
+      </div>
+      <div class="flow-row">
+        <div class="flow-icon" style="background:#ff7ab822">🎙️</div>
+        <div class="label">3:15pm · ⌘⇧V or "hi twin," speech turns to text on-device</div>
+        <span class="tag stay">on-device</span>
+      </div>
+      <div class="flow-row">
+        <div class="flow-icon" style="background:#ffd35c22">🔔</div>
+        <div class="label">9:40pm · flight tomorrow, a payment text nearby, one nudge</div>
+        <span class="tag stay">local only</span>
+      </div>
+      <div class="flow-row">
         <div class="flow-icon" style="background:#c6ff4a22">🔑</div>
-        <div class="label">your API key<small>kept in the macOS Keychain, not a file</small></div>
+        <div class="label">your API key · kept in the macOS Keychain</div>
         <span class="tag stay">stays home</span>
       </div>
       <div class="flow-row">
         <div class="flow-icon" style="background:#ffd35c22">🫧</div>
-        <div class="label">fuzzy summary<small>"got paid yesterday", never "$1,240"</small></div>
+        <div class="label">fuzzy summary · "got paid yesterday," not "$1,240"</div>
         <span class="tag stay">built locally</span>
       </div>
       <div class="flow-row">
         <div class="flow-icon" style="background:#7ad7ff22">💬</div>
-        <div class="label">your AI provider<small>Claude, GPT, Gemini or Grok. your message, name, today's events + that summary</small></div>
+        <div class="label">your AI provider · message, name, events + summary only</div>
         <span class="tag go">only exit</span>
       </div>
       <div class="flow-row">
         <div class="flow-icon" style="background:#ff7ab822">🚫</div>
-        <div class="label">our servers<small>we don't have any. genuinely.</small></div>
+        <div class="label">our servers · we don't have any, genuinely</div>
         <span class="tag never">never</span>
       </div>
     </div>
@@ -1038,9 +1061,9 @@ footer .made {
 
 <section id="features">
   <div class="wrap">
-    <p class="eyebrow">stuff it does</p>
+    <p class="eyebrow">and a few smaller things</p>
     <h2>small buddy. surprisingly handy.</h2>
-    <p class="lede">No dashboard, no onboarding flow, no 14-step tour. It's a little bubble on your screen that talks back.</p>
+    <p class="lede">That's the daily stuff. No dashboard, no onboarding flow, no 14-step tour, just a little bubble on your screen with a few more tricks up its sleeve.</p>
 
     <div class="features">
       <div class="feature f-hotkey" style="--accent: var(--lime)">
@@ -1077,32 +1100,6 @@ footer .made {
         </div>
         <h3>one hotkey away</h3>
         <p>Hit <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>space</kbd> from anywhere and Twin pops up in a floating bubble. Hit it again and it goes away. No app to switch to.</p>
-      </div>
-
-      <div class="feature f-memory" style="--accent: var(--sky)">
-        <div class="art">
-          <svg viewBox="0 0 200 230" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
-            <rect class="drop" x="58" y="14" width="16" height="11" rx="3" fill="#c6ff4a"/>
-            <rect class="drop dr2" x="80" y="14" width="16" height="11" rx="3" fill="#ff7ab8"/>
-            <rect class="drop dr3" x="102" y="14" width="16" height="11" rx="3" fill="#ffd35c"/>
-            <rect class="drop dr4" x="68" y="14" width="16" height="11" rx="3" fill="#c6ff4a"/>
-            <path class="db-body" d="M45 125 V190 A55 14 0 0 0 155 190 V125"/>
-            <path class="db-ring" d="M45 148 A55 14 0 0 0 155 148"/>
-            <path class="db-ring" d="M45 169 A55 14 0 0 0 155 169"/>
-            <ellipse class="lid" cx="100" cy="125" rx="55" ry="14"/>
-            <g transform="translate(136 104)">
-              <g class="duck">
-                <ellipse cx="0" cy="8" rx="13" ry="9" fill="#ffd35c"/>
-                <circle cx="7" cy="-4" r="7" fill="#ffd35c"/>
-                <path d="M13 -5 L21 -3 L13 -1 Z" fill="#ff9a3c"/>
-                <circle cx="9" cy="-5" r="1.6" fill="#111"/>
-              </g>
-            </g>
-            <text class="caption" x="100" y="222">twin.duckdb · on-device</text>
-          </svg>
-        </div>
-        <h3>remembers what you've been up to</h3>
-        <p>Every time Twin starts, it pulls new bank texts from Messages into a local DuckDB file and checks today's calendar, so it has a rough picture of your day without you explaining it.</p>
       </div>
 
       <div class="feature f-weird" data-gaze="5" style="--accent: var(--pink)">

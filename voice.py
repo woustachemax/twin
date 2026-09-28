@@ -175,10 +175,6 @@ class Recorder:
                 return
             self.recorder.updateMeters()
             level = self.recorder.averagePowerForChannel_(0)
-            # A short rolling average, not the raw instantaneous reading: room noise isn't a
-            # flat line, it jitters several dB sample to sample, and comparing that jitter
-            # straight against a threshold makes brief noise peaks look like speech and brief
-            # dips mid-sentence look like silence.
             smoothed = level if smoothed is None else smoothed + (level - smoothed) * SMOOTHING_ALPHA
             elapsed = time.monotonic() - started
             if smoothed >= speech_threshold:
@@ -198,10 +194,6 @@ class Recorder:
             time.sleep(METER_POLL_SECONDS)
 
     def _calibrate(self, stop_event):
-        """Sample this recording's own opening ~400ms to measure the room's current noise
-        floor, then derive the silence/speech thresholds as fixed offsets above it. Self-
-        adjusting per recording, rather than assuming one fixed absolute noise floor that a
-        quiet room and a noisy one can differ from by 20+ dB."""
         started = time.monotonic()
         samples = []
         while time.monotonic() - started < CALIBRATION_SECONDS:
@@ -209,23 +201,17 @@ class Recorder:
                 return None, None
             self.recorder.updateMeters()
             level = self.recorder.averagePowerForChannel_(0)
-            if level > -100:  # the recorder's first reading or two can read as an unready -120
+            if level > -100:
                 samples.append(level)
             time.sleep(CALIBRATION_POLL_SECONDS)
         if samples:
             samples.sort()
-            floor = samples[len(samples) // 2]  # median: resists a single stray loud or quiet blip
-            peak = samples[-1]  # the loudest moment noise actually reached during calibration
+            floor = samples[len(samples) // 2]
+            peak = samples[-1]
         else:
             floor = peak = FALLBACK_NOISE_FLOOR_DB
         floor = max(MIN_NOISE_FLOOR_DB, min(MAX_NOISE_FLOOR_DB, floor))
         peak = max(MIN_NOISE_FLOOR_DB, min(MAX_NOISE_FLOOR_DB, peak))
-        # The silence threshold must clear whatever noise actually peaked at during calibration,
-        # not just sit a fixed offset above the median: a room with bursty noise (a fan cycling,
-        # a fridge) can have a median well below its peak, and floor + offset alone can still
-        # land inside that peak's range. The speech threshold stays keyed to the floor alone,
-        # not to the (possibly burst-raised) silence threshold, so a noise burst during
-        # calibration can't also make real speech look quieter than it is.
         silence_threshold = max(floor + SILENCE_OFFSET_DB, peak + SILENCE_GUARD_DB)
         speech_threshold = max(floor + SPEECH_OFFSET_DB, silence_threshold + MIN_THRESHOLD_GAP_DB)
         return silence_threshold, speech_threshold
@@ -326,12 +312,6 @@ class WakeWordListener:
             if now < self._retry_at:
                 return
             if not has_access():
-                # Permission hasn't been granted (or asked) yet. Never probe AVAudioEngine or
-                # SFSpeechRecognizer to find out from here: on undetermined permission, macOS
-                # answers that probe with its own system prompt and blocks this thread — the
-                # main thread — until a person responds to it, freezing the whole app. Wait
-                # instead for the explicit, background-threaded request in ensure_access(),
-                # which only ever runs from a manual tap or an already-granted wake.
                 self._retry_at = now + self.RETRY_COOLDOWN_SECONDS
                 return
             try:
@@ -375,9 +355,6 @@ class WakeWordListener:
                 return
             if result is not None and self.get_pattern().search(result.bestTranscription().formattedString()):
                 self._woken = True
-                # Release the microphone right away, but don't cancel this very task from within
-                # its own result callback: that's reentrant and hangs. tick() cancels it shortly
-                # after, off this call stack.
                 self._release_audio()
                 self.on_wake()
 
