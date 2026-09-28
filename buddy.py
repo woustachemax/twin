@@ -43,6 +43,7 @@ import imessage_export
 import llm_providers
 import nudges
 import run_pipeline
+import travel_search
 import voice
 import screen_reader
 from llm_providers import PROVIDERS, ProviderError
@@ -250,6 +251,10 @@ SCREEN_PROMPT = """What's on the user's screen right now, as one vague sentence 
 {screen}
 
 Answer their question about the screen from that sentence alone. Stay general, don't guess at specific text, names, or numbers you can't see, and keep it to a sentence or two."""
+FLIGHT_PROMPT = """Real flight search results, fetched just now from a live flights API. These are the only real facts: never invent, change, or drop a price, time, or airline name, and don't add options that aren't listed here.
+{flights}
+
+Present exactly these options to the user as a short, easy-to-scan list (one line per flight: airline, times, price, stops). You can add at most one short sentence of your own personality before or after the list, nothing more."""
 REASK_NOTE = "just a name is perfect, nothing else needed. what should I call you?"
 PERSONA_MENU_NOTE = (
     "nice to meet you, {name}! one last thing: pick the buddy you'd like to hang out with. you can switch "
@@ -319,6 +324,21 @@ DIGEST_UNREADABLE_NOTE = (
 )
 DIGEST_LIMIT = 500
 
+FLIGHT_NO_ORIGIN_NOTE = (
+    'Where are you flying from? Try something like "flights from Mumbai to Goa next weekend."'
+)
+FLIGHT_UNKNOWN_PLACE_NOTE = (
+    'I don\'t recognize "{place}" as a city or airport. Try naming the nearest big city, or its airport code.'
+)
+FLIGHT_ERROR_NOTES = {
+    "no_key": "I don't have a flight search key set up yet, so I can't look up real flights right now.",
+    "auth": "My flight search key isn't being accepted right now.",
+    "rate_limit": "Flight search is getting hit too fast right now. Try again in a moment.",
+    "offline": "I can't reach flight search right now. Check your connection and try again.",
+    "api_error": "Flight search had a problem on its end. Try again shortly.",
+    "not_found": "That route didn't turn up any flights, even to search. Double-check the cities and try again.",
+}
+
 CATEGORIES = [
     ("food and dining", ("swiggy", "zomato", "restaurant", "cafe", "starbucks", "dominos", "pizza", "mcdonald", "kfc", "eatsure")),
     ("groceries", ("bigbasket", "blinkit", "zepto", "instamart", "dmart", "grocery", "jiomart")),
@@ -353,6 +373,7 @@ LONG_NUMBER_RE = re.compile(r"\d[\d,]{2,}(?:\.\d+)?|\d+\.\d+")
 ANY_NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)*")
 CALENDAR_LINE_RE = re.compile(r"^- (\d{1,2}:\d{2} [AP]M|all day): (.+)$")
 NOW_LINE_RE = re.compile(r"^It's currently \d{1,2}:\d{2} [AP]M on [A-Z][a-z]+day\.$")
+FLIGHT_LINE_RE = re.compile(r"^✈ ")
 CALENDAR_TITLE_LIMIT = 80
 
 
@@ -454,6 +475,11 @@ def scrub_system(system):
         if NOW_LINE_RE.match(line):
             lines.append(line)
             continue
+        if FLIGHT_LINE_RE.match(line):
+            # Real prices/times fetched from the flights API on purpose; the redaction rules below
+            # exist for possibly-sensitive text elsewhere and would gut this line to "[amount]"/"[number]".
+            lines.append(line)
+            continue
         match = CALENDAR_LINE_RE.match(line)
         if match:
             title, found = scrub(match.group(2)[:CALENDAR_TITLE_LIMIT], strict=False)
@@ -493,7 +519,7 @@ def calendar_context(events):
     )
 
 
-def build_request(persona, question, user_name=None, calendar_events=None, screen=None):
+def build_request(persona, question, user_name=None, calendar_events=None, screen=None, flights=None):
     finance, notes = vet_context(build_context())
     now = datetime.now()
     context = CONTEXT_PROMPT.format(
@@ -509,6 +535,8 @@ def build_request(persona, question, user_name=None, calendar_events=None, scree
     }
     if screen:
         request["system"] += "\n\n" + SCREEN_PROMPT.format(screen=screen)
+    if flights:
+        request["system"] += "\n\n" + FLIGHT_PROMPT.format(flights=flights)
     return request, notes
 
 
@@ -563,8 +591,8 @@ def voice_line(client, persona, message):
     return persona["frame"].format(message=message)
 
 
-def ask_model(client, persona, question, user_name=None, calendar_events=None, screen=None):
-    request, notes = build_request(persona, question, user_name, calendar_events, screen)
+def ask_model(client, persona, question, user_name=None, calendar_events=None, screen=None, flights=None):
+    request, notes = build_request(persona, question, user_name, calendar_events, screen, flights)
     try:
         text, refused = send_to_api(client, request, notes)
     except ProviderError as e:
@@ -1891,6 +1919,10 @@ class Buddy:
         if is_screen_question(question):
             self.look_at_screen(question)
             return "break"
+        flight_query = travel_search.parse_flight_query(question)
+        if flight_query:
+            self.search_flights(question, flight_query)
+            return "break"
         self.busy = True
         self.say("…")
         threading.Thread(
@@ -1933,6 +1965,50 @@ class Buddy:
         except Exception as e:
             reappear()
             print(f"[buddy] screen look failed: {e!r}", file=sys.stderr)
+            reply, kind = offline_line(persona, "broken", self.client), "reply_error"
+        self.replies.put((kind, reply, persona["done"]))
+        if error:
+            self.replies.put(("raw_notice", error, None))
+
+    def search_flights(self, question, flight_query):
+        self.busy = True
+        self.say("…")
+        threading.Thread(
+            target=self.run_flight_search, args=(self.persona, question, self.user_name, flight_query),
+            daemon=True,
+        ).start()
+
+    def run_flight_search(self, persona, question, user_name, flight_query):
+        error = None
+        try:
+            events, error = self.calendar.get()
+            origin_text = flight_query["origin_text"] or self.config.get("home_airport")
+            if not origin_text:
+                reply, kind = self.voice(persona, FLIGHT_NO_ORIGIN_NOTE), "reply_error"
+            else:
+                origin_code = travel_search.resolve_place(origin_text)
+                destination_code = travel_search.resolve_place(flight_query["destination_text"])
+                unresolved = (
+                    origin_text if origin_code is None else
+                    flight_query["destination_text"] if destination_code is None else None
+                )
+                if unresolved:
+                    reply = self.voice(persona, FLIGHT_UNKNOWN_PLACE_NOTE.format(place=unresolved))
+                    kind = "reply_error"
+                else:
+                    depart_date = travel_search.resolve_date(flight_query["date_phrase"])
+                    options = travel_search.search_flights(origin_code, destination_code, depart_date)
+                    flights = travel_search.format_flight_options(
+                        options, origin_code, destination_code, depart_date,
+                    )
+                    reply, ok = ask_model(self.client, persona, question, user_name, events, flights=flights)
+                    kind = "reply" if ok else "reply_error"
+        except travel_search.TravelSearchError as e:
+            print(f"[buddy] flight search failed: {e.kind} ({e.detail})", file=sys.stderr)
+            note = FLIGHT_ERROR_NOTES.get(e.kind, FLIGHT_ERROR_NOTES["api_error"])
+            reply, kind = self.voice(persona, note), "reply_error"
+        except Exception as e:
+            print(f"[buddy] flight search failed: {e!r}", file=sys.stderr)
             reply, kind = offline_line(persona, "broken", self.client), "reply_error"
         self.replies.put((kind, reply, persona["done"]))
         if error:
