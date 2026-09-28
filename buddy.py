@@ -341,6 +341,16 @@ FILING_ERROR_NOTES = {
     "offline": "I can't reach SEC's filings database right now. Check your connection and try again.",
     "api_error": "SEC's filings database had a problem on its end. Try again shortly.",
 }
+EDGAR_CONTACT_MESSAGE = (
+    "SEC asks for a real contact email on every filing lookup, so it can reach an actual person "
+    "if something needs attention, not Twin as an app. It's sent only to SEC EDGAR, on every "
+    "filing request, never anywhere else."
+)
+EDGAR_CONTACT_SKIPPED_NOTE = (
+    "No worries, I'll leave that filing lookup for now. Whenever you're ready, set a contact "
+    "email with /setup edgar, or the SEC_EDGAR_CONTACT environment variable."
+)
+EDGAR_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 CATEGORIES = [
     ("food and dining", ("swiggy", "zomato", "restaurant", "cafe", "starbucks", "dominos", "pizza", "mcdonald", "kfc", "eatsure")),
@@ -1803,7 +1813,10 @@ class Buddy:
     def run_command(self, text):
         parts = text.split()
         if parts[0].lower() == "/setup":
-            self.open_setup()
+            if len(parts) > 1 and parts[1].lower() == "edgar":
+                self.prompt_edgar_contact(lambda email: None)
+            else:
+                self.open_setup()
             return True
         if parts[0].lower() == "/voice":
             self.handle_voice_command(parts[1:])
@@ -2044,6 +2057,9 @@ class Buddy:
             reply, ok = ask_model(self.client, persona, question, user_name, events, filings=filings)
             kind = "reply" if ok else "reply_error"
         except research_search.ResearchSearchError as e:
+            if e.kind == "contact_not_configured":
+                self.replies.put(("edgar_contact_needed", (question, filing_query), None))
+                return
             print(f"[buddy] filing search failed: {e.kind} ({e.detail})", file=sys.stderr)
             note = FILING_ERROR_NOTES.get(e.kind, FILING_ERROR_NOTES["api_error"]).format(
                 company=filing_query["company_text"], form=filing_query["form_type"],
@@ -2055,6 +2071,15 @@ class Buddy:
         self.replies.put((kind, reply, persona["done"]))
         if error:
             self.replies.put(("raw_notice", error, None))
+
+    def prompt_edgar_contact(self, on_done):
+        EdgarContactPrompt(self.root, self.config, save_config, on_done, LANDING).show()
+
+    def on_edgar_contact(self, email, question, filing_query):
+        if email:
+            self.search_filings(question, filing_query)
+        else:
+            self.say(self.voice(self.persona, EDGAR_CONTACT_SKIPPED_NOTE), typing=True)
 
     def answer(self, persona, question, user_name):
         error = None
@@ -2113,6 +2138,13 @@ class Buddy:
                 self.canvas.itemconfigure(self.mic_dot, fill=self.theme["field_edge"])
                 self.set_status(self.idle_status())
                 self.notify(message)
+            elif kind == "edgar_contact_needed":
+                self.busy = False
+                self.set_status(self.idle_status())
+                original_question, original_filing_query = message
+                self.prompt_edgar_contact(
+                    lambda email, q=original_question, fq=original_filing_query: self.on_edgar_contact(email, q, fq)
+                )
             else:
                 self.busy = False
                 menu, self.next_menu = self.next_menu, None
@@ -2303,6 +2335,128 @@ def create_database():
         print(f"[buddy] couldn't create {DB_PATH}: {e}", file=sys.stderr)
         return "failed"
     return "found" if existed else "created"
+
+
+class EdgarContactPrompt:
+    """One-time modal asking for a contact email to put in SEC EDGAR's required User-Agent
+    header. Shown lazily, the first time a filing lookup is actually attempted with none
+    configured, rather than during first-run onboarding, since most users will never touch
+    filing search. Saves to config["edgar_contact"] and calls on_done(email), or on_done(None)
+    if the user skips; the caller decides what happens next either way."""
+
+    WIDTH = 420
+    HEIGHT = 300
+    MARGIN = 20
+
+    def __init__(self, root, config, save_config, on_done, colors):
+        self.root = root
+        self.config = config
+        self.save_config = save_config
+        self.on_done = on_done
+        self.c = colors
+        self.display, self.mono = pick_fonts()
+        self.win = None
+        self.canvas = None
+        self.entry = None
+        self.status = None
+
+    def shape(self, tag, x1, y1, x2, y2, r, fill, edge=None, extra=()):
+        if edge:
+            for item in rounded_rect_items(self.canvas, x1, y1, x2, y2, r, (tag, f"{tag}_edge") + extra):
+                self.canvas.itemconfigure(item, fill=edge)
+            x1, y1, x2, y2, r = x1 + 1, y1 + 1, x2 - 1, y2 - 1, r - 1
+        for item in rounded_rect_items(self.canvas, x1, y1, x2, y2, r, (tag, f"{tag}_fill") + extra):
+            self.canvas.itemconfigure(item, fill=fill)
+
+    def text(self, x, y, text, size=13, bold=False, color=None, anchor="w", width=None, tags=()):
+        font = (self.display, size) + (("bold",) if bold else ())
+        return self.canvas.create_text(x, y, text=text, anchor=anchor, font=font, fill=color or self.c["text"],
+                                       width=width, tags=tags)
+
+    def show(self):
+        c = self.c
+        win = tk.Toplevel(self.root)
+        self.win = win
+        win.title("Twin")
+        win.configure(bg=c["bg"])
+        win.resizable(False, False)
+        win.protocol("WM_DELETE_WINDOW", self.skip)
+
+        canvas = tk.Canvas(win, width=self.WIDTH, height=self.HEIGHT, bg=c["bg"], highlightthickness=0, bd=0)
+        canvas.pack()
+        self.canvas = canvas
+
+        dot = mix(c["bg"], "#FFFFFF", 0.06)
+        for x in range(14, self.WIDTH, 28):
+            for y in range(14, self.HEIGHT, 28):
+                canvas.create_oval(x, y, x + 1.6, y + 1.6, fill=dot, outline="")
+
+        self.shape("card", self.MARGIN, self.MARGIN, self.WIDTH - self.MARGIN, self.HEIGHT - self.MARGIN, 20,
+                   c["card"], edge=c["line"])
+        pad_x = self.MARGIN + 24
+        field_right = self.WIDTH - pad_x
+
+        self.text(pad_x, self.MARGIN + 30, "One quick thing", size=18, bold=True, color=c["text"], anchor="w")
+        message_item = self.text(pad_x, self.MARGIN + 58, EDGAR_CONTACT_MESSAGE, size=12, color=c["muted"],
+                                 width=field_right - pad_x, anchor="nw")
+
+        entry_top = self.canvas.bbox(message_item)[3] + 14
+        self.shape("field", pad_x, entry_top, field_right, entry_top + 42, 14, c["bg2"], edge=c["line"])
+        entry = tk.Entry(win, bd=0, highlightthickness=0, relief="flat", bg=c["bg2"], fg=c["text"],
+                         insertbackground=c["lime"], font=(self.display, 13))
+        canvas.create_window(pad_x + 16, entry_top + 21, anchor="w", window=entry, width=field_right - pad_x - 32)
+        entry.focus_set()
+        self.entry = entry
+
+        status_top = entry_top + 42 + 10
+        self.status = self.text(pad_x, status_top, "", size=11, color=c["pink"],
+                                width=field_right - pad_x, anchor="nw")
+
+        button_w, button_h = 160, 42
+        button_x1 = (self.WIDTH - button_w) / 2
+        button_top = status_top + 26
+        self.shape("button", button_x1, button_top, button_x1 + button_w, button_top + button_h, 20, c["lime"])
+        self.text(button_x1 + button_w / 2, button_top + button_h / 2, "Save", size=14, bold=True, color=c["face"],
+                  anchor="center", tags=("button",))
+        canvas.tag_bind("button", "<Button-1>", lambda _e: self.do_save())
+        canvas.tag_bind("button", "<Enter>", lambda _e: self.hover_button(True))
+        canvas.tag_bind("button", "<Leave>", lambda _e: self.hover_button(False))
+
+        skip_top = button_top + button_h + 18
+        self.text(self.WIDTH / 2, skip_top, "not now", size=12, color=c["sky"], anchor="center", tags=("skip",))
+        canvas.itemconfigure("skip", font=(self.display, 12, "underline"))
+        canvas.tag_bind("skip", "<Button-1>", lambda _e: self.skip())
+        canvas.tag_bind("skip", "<Enter>", lambda _e: canvas.config(cursor="pointinghand"))
+        canvas.tag_bind("skip", "<Leave>", lambda _e: canvas.config(cursor=""))
+
+        win.bind("<Return>", lambda _e: self.do_save())
+        win.bind("<Escape>", lambda _e: self.skip())
+        win.update_idletasks()
+        x = win.winfo_screenwidth() // 2 - self.WIDTH // 2
+        y = win.winfo_screenheight() // 2 - self.HEIGHT // 2
+        win.geometry(f"+{x}+{y}")
+        win.grab_set()
+        win.lift()
+        win.focus_force()
+
+    def hover_button(self, on):
+        self.canvas.itemconfigure("button_fill", fill=mix(self.c["lime"], "#FFFFFF", 0.15) if on else self.c["lime"])
+        self.canvas.config(cursor="pointinghand" if on else "")
+
+    def do_save(self):
+        email = self.entry.get().strip()
+        if not EDGAR_EMAIL_RE.match(email):
+            self.canvas.itemconfigure(self.status, text="That doesn't look like an email address.")
+            return
+        self.config["edgar_contact"] = email
+        self.save_config(self.config)
+        research_search.invalidate_contact_cache()
+        self.win.destroy()
+        self.on_done(email)
+
+    def skip(self):
+        self.win.destroy()
+        self.on_done(None)
 
 
 class SetupScreen:

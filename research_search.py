@@ -5,8 +5,12 @@ Resolves a company name/ticker to a CIK via SEC's free company_tickers.json, the
 that company's recent filings from EDGAR's public submissions API and fetches the actual
 filing document text. No API key is needed, but SEC requires a descriptive User-Agent with
 a real contact on every request, and a self-imposed rate limit under 10 requests/second.
-Set SEC_EDGAR_CONTACT in the environment (or .env) to a string like "you@example.com" so
-requests identify a real contact, per SEC's fair-access policy.
+
+The contact comes from SEC_EDGAR_CONTACT in the environment (or .env), or failing that,
+config["edgar_contact"] (set once via buddy.py's onboarding prompt or /setup edgar). There
+is deliberately no hardcoded fallback contact: a baked-in address would mean every
+unconfigured install's EDGAR traffic gets attributed to whoever's email shipped in the
+source, which is both wrong and a fast way to get that address rate-limited or blocked.
 """
 import json
 import os
@@ -16,10 +20,12 @@ import time
 import urllib.error
 import urllib.request
 from html.parser import HTMLParser
+from pathlib import Path
 
 from llm_providers import ssl_context
 
 SEC_CONTACT_ENV = "SEC_EDGAR_CONTACT"
+CONFIG_PATH = Path(os.environ.get("TWIN_CONFIG_PATH", "~/.twin/config.json")).expanduser()
 TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik:010d}.json"
 ARCHIVES_BASE = "https://www.sec.gov/Archives/edgar/data"
@@ -75,6 +81,10 @@ _ticker_cache_lock = threading.Lock()
 _rate_lock = threading.Lock()
 _last_request_at = 0.0
 
+_UNSET = object()  # distinguishes "haven't checked config.json yet" from "checked, no contact set"
+_contact_cache = _UNSET
+_contact_cache_lock = threading.Lock()
+
 
 class ResearchSearchError(Exception):
     def __init__(self, kind, detail=""):
@@ -113,10 +123,46 @@ def parse_filing_query(text):
     return None
 
 
+def _read_configured_contact():
+    """Reads config["edgar_contact"] from the same config file buddy.py uses. Best-effort:
+    any problem reading it just means "not configured", handled the same as a missing file."""
+    try:
+        with open(CONFIG_PATH) as f:
+            config = json.load(f)
+    except (OSError, ValueError):
+        return None
+    contact = config.get("edgar_contact") if isinstance(config, dict) else None
+    return contact.strip() if isinstance(contact, str) and contact.strip() else None
+
+
+def _configured_contact():
+    """Cached after the first read, since a single filing lookup makes several sequential
+    SEC requests (ticker resolution, submissions, document fetch), each checking this. Call
+    invalidate_contact_cache() after writing a new edgar_contact so the change is picked up
+    without restarting the app."""
+    global _contact_cache
+    with _contact_cache_lock:
+        if _contact_cache is _UNSET:
+            _contact_cache = _read_configured_contact()
+        return _contact_cache
+
+
+def invalidate_contact_cache():
+    """Call this right after writing a new config["edgar_contact"] to disk (e.g. from
+    EdgarContactPrompt), so the next lookup re-reads it instead of serving a stale value
+    cached from before it was set."""
+    global _contact_cache
+    with _contact_cache_lock:
+        _contact_cache = _UNSET
+
+
 def _user_agent():
-    contact = os.environ.get(SEC_CONTACT_ENV, "").strip()
+    contact = os.environ.get(SEC_CONTACT_ENV, "").strip() or _configured_contact()
     if not contact:
-        contact = "contact-not-configured@example.com"
+        raise ResearchSearchError(
+            "contact_not_configured",
+            "no SEC_EDGAR_CONTACT env var and no edgar_contact in config",
+        )
     return f"Twin research-lookup {contact}"
 
 
@@ -139,8 +185,9 @@ def _failure_kind(status):
 
 
 def _fetch(url, decode_json):
+    headers = {"User-Agent": _user_agent()}  # raises contact_not_configured before we throttle for nothing
     _throttle()
-    request = urllib.request.Request(url, headers={"User-Agent": _user_agent()})
+    request = urllib.request.Request(url, headers=headers)
     try:
         with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT, context=ssl_context()) as response:
             raw = response.read()
