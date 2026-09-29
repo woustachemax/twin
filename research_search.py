@@ -335,7 +335,7 @@ def fetch_filing_excerpt(cik, filing, max_chars=MAX_EXCERPT_CHARS):
 
 def format_filing_context(company, filing, excerpt):
     """Plain-text block for the model's system prompt. Every line is real, already-fetched filing text."""
-    header = f"📄 {company['title']} ({company['ticker']}) — {filing['form']} filed {filing['filingDate']}"
+    header = f"📄 {company['title']} ({company['ticker']}): {filing['form']} filed {filing['filingDate']}"
     if filing.get("reportDate"):
         header += f", for the period ending {filing['reportDate']}"
     lines = [header]

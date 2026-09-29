@@ -145,6 +145,7 @@ Your API key is not in either folder. It's stored in your macOS Keychain.
 - **An API key** from one of the [supported providers](#ai-providers). You paste it into the setup window on first run.
 - **Internet access for the Donut model, once.** The first time you run `/ingest` on an image or a scanned PDF page, Twin downloads an 800 MB checkpoint from Hugging Face to `~/.cache/huggingface`. Every call after that loads from the local cache.
 - **A contact for SEC EDGAR, only for filing lookup.** Set `SEC_EDGAR_CONTACT`, or Twin asks for one the first time you look up a filing and saves it to `config["edgar_contact"]`.
+- **`/ingest` needs a source install, not the downloadable app.** `document_ingest.py`'s dependencies (`pypdfium2`, `torch`, `transformers`, `sentencepiece`, `protobuf`, `Pillow`) aren't bundled into `Twin.app` or the `.dmg`: installing them, plus everything they transitively pull in, would take the app from about 150 MB to nearly 1 GB for a feature most people won't use. `buddy.py` imports `document_ingest` lazily, so the packaged app launches and runs normally either way; typing `/ingest` in it just explains that it needs a source install with those packages (see [Installation](#installation)). Everything else in this README works the same in both the packaged app and a source install.
 
 Python packages:
 
@@ -176,9 +177,10 @@ source .venv/bin/activate
 
 pip install anthropic duckdb python-dotenv pynput pyobjc-framework-Cocoa pyobjc-framework-Quartz pyobjc-framework-Vision pyobjc-framework-EventKit pyobjc-framework-Speech pyobjc-framework-AVFoundation
 pip install streamlit pandas
+pip install pypdfium2 torch transformers sentencepiece protobuf Pillow
 ```
 
-The second `pip install` is only needed for the data monitor.
+The second `pip install` is only needed for the data monitor. The third is only needed for `/ingest` (receipt and document OCR): it pulls in `torch` and `transformers`, so it's a much bigger download than everything else here combined. Skip it if you don't need `/ingest`; the rest of Twin works fine without it. This is also why it's left out of the downloadable `.dmg` (see [Requirements](#requirements)).
 
 Then run it from the terminal:
 
@@ -202,7 +204,7 @@ The app bundles its own Python, Tcl/Tk, fonts, and icon, so it doesn't depend on
 
 A few things to know:
 
-- The app is ad-hoc signed, not signed with a paid Developer ID or notarized — that's the deliberate, current shipping state, not a placeholder. On the Mac that built it, that's invisible: it just opens. On any other Mac, the first launch needs clearing Gatekeeper's block — see [Installing a release build](#installing-a-release-build) for the one-line install script (which clears it for you) or the manual steps. See [docs/RELEASING.md](docs/RELEASING.md) for why, and what real Developer ID signing would take if that's ever worth it.
+- The app is ad-hoc signed, not signed with a paid Developer ID or notarized. That's the deliberate, current shipping state, not a placeholder. On the Mac that built it, that's invisible: it just opens. On any other Mac, the first launch needs clearing Gatekeeper's block; see [Installing a release build](#installing-a-release-build) for the one-line install script (which clears it for you) or the manual steps. See [docs/RELEASING.md](docs/RELEASING.md) for why, and what real Developer ID signing would take if that's ever worth it.
 - macOS ties permissions to the app's signature, and every rebuild gets a new one. After rebuilding, turn Twin back on under Full Disk Access, Accessibility, and Screen Recording.
 - `setup.py` works around a few py2app issues with uv-managed Python: it raises the recursion limit, handles a built-in `zlib`, and copies the Tcl/Tk libraries into the bundle.
 
@@ -217,9 +219,9 @@ brew install create-dmg   # optional; the script falls back to a plain hdiutil .
 scripts/build_dmg.sh
 ```
 
-With no environment variables set — the normal way to run it — this produces the same ad-hoc-signed build as above, just in `.dmg` form, and that's what actually ships (see the download on the [landing page](#landing-page)). Anyone opening it on a Mac other than the one that built it needs to clear Gatekeeper's block the same way described in [Installing a release build](#installing-a-release-build); that's expected, not a bug to chase down. `docs/RELEASING.md` covers the optional `CODESIGN_IDENTITY`/`NOTARY_PROFILE` path if a paid Developer ID account ever becomes worth it.
+With no environment variables set (the normal way to run it), this produces the same ad-hoc-signed build as above, just in `.dmg` form, and that's what actually ships (see the download on the [landing page](#landing-page)). Anyone opening it on a Mac other than the one that built it needs to clear Gatekeeper's block the same way described in [Installing a release build](#installing-a-release-build); that's expected, not a bug to chase down. `docs/RELEASING.md` covers the optional `CODESIGN_IDENTITY`/`NOTARY_PROFILE` path if a paid Developer ID account ever becomes worth it.
 
-The version number for the `.dmg` filename, the app bundle, the git tag, and the landing page's download link all come from the single `VERSION` file at the repo root — see [Versioning](docs/RELEASING.md#versioning) for how to cut a release with `scripts/release.sh` without them drifting apart.
+The version number for the `.dmg` filename, the app bundle, the git tag, and the landing page's download link all come from the single `VERSION` file at the repo root; see [Versioning](docs/RELEASING.md#versioning) for how to cut a release with `scripts/release.sh` without them drifting apart.
 
 ## Installing a release build
 
@@ -231,7 +233,7 @@ This is for anyone who just wants to run Twin, not build it from source.
 curl -fsSL https://raw.githubusercontent.com/woustachemax/twin/main/scripts/install.sh | bash
 ```
 
-`scripts/install.sh` downloads the latest release's `.dmg` from GitHub, mounts it, copies `Twin.app` into `/Applications`, and clears the quarantine flag so Gatekeeper doesn't block the first launch. It's safe to re-run — an existing install is replaced, not skipped — and it fails loudly (clear error, non-zero exit) if any step doesn't work rather than continuing silently.
+`scripts/install.sh` downloads the latest release's `.dmg` from GitHub, mounts it, copies `Twin.app` into `/Applications`, and clears the quarantine flag so Gatekeeper doesn't block the first launch. It's safe to re-run (an existing install is replaced, not skipped), and it fails loudly (clear error, non-zero exit) if any step doesn't work rather than continuing silently.
 
 **Manual download**, if you'd rather not pipe a script into `bash`: grab the `.dmg` from the [latest release](https://github.com/woustachemax/twin/releases/latest), drag `Twin.app` into Applications, then clear the first-launch block yourself:
 
@@ -241,6 +243,8 @@ curl -fsSL https://raw.githubusercontent.com/woustachemax/twin/main/scripts/inst
 4. Click **Open Anyway**, then confirm **Open** in the dialog that follows (Touch ID or your password may be requested).
 
 Or skip that with `xattr -cr /Applications/Twin.app` in Terminal after dragging it in.
+
+Either way you install it, this build doesn't include `/ingest` (receipt and document OCR); see [Requirements](#requirements) for why and how to get it via a source install.
 
 ## First run
 
@@ -594,5 +598,5 @@ It covers the pitch, the "why local" explanation, an animated features grid, per
 - Twin keeps one ingested document active at a time. Loading a new one with `/ingest` replaces the active document; older ones stay in `~/.twin/twin.duckdb` but are no longer part of the conversation until re-ingested.
 - Filing lookup only searches EDGAR's "recent" filings window, roughly the last year of a company's activity. A form type filed further back comes back as not found even if it exists.
 - Donut is fine-tuned on receipts. Extraction quality on other kinds of document photos is weaker.
-- `Twin.app` ships ad-hoc signed, not signed with a paid Developer ID or notarized — a deliberate call for a portfolio project without real public download volume, not a gap to fill later. On a Mac other than the one that built it, the first launch needs clearing Gatekeeper's block — `scripts/install.sh` does this automatically, or see [Installing a release build](#installing-a-release-build) for the manual System Settings steps (or `xattr -cr`). See [docs/RELEASING.md](docs/RELEASING.md).
+- `Twin.app` ships ad-hoc signed, not signed with a paid Developer ID or notarized: a deliberate call for a portfolio project without real public download volume, not a gap to fill later. On a Mac other than the one that built it, the first launch needs clearing Gatekeeper's block; `scripts/install.sh` does this automatically, or see [Installing a release build](#installing-a-release-build) for the manual System Settings steps (or `xattr -cr`). See [docs/RELEASING.md](docs/RELEASING.md).
 - Licensed under MIT (see `LICENSE`). The bundled fonts are under the SIL Open Font License.

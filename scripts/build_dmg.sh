@@ -5,7 +5,7 @@
 # Usage:
 #   scripts/build_dmg.sh
 #
-# Env vars (all optional — see docs/RELEASING.md for how to set them up):
+# Env vars (all optional, see docs/RELEASING.md for how to set them up):
 #   CODESIGN_IDENTITY   "Developer ID Application: Your Name (TEAMID)"
 #                        Signs the app and dmg for distribution. When unset,
 #                        the app is ad-hoc signed (codesign -s -), which only
@@ -14,7 +14,7 @@
 #                        `xcrun notarytool store-credentials`. Required to
 #                        notarize and staple; skipped when unset.
 #
-# This script never reads a raw Apple ID password, API key, or certificate —
+# This script never reads a raw Apple ID password, API key, or certificate,
 # only an identity name and a keychain profile name. The actual secrets live
 # in the login keychain (for the notary profile) and the Keychain Access
 # certificate store (for the signing identity), both outside this repo.

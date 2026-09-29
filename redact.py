@@ -7,13 +7,13 @@ it will occasionally flag something that isn't actually PII. That tradeoff is in
 v1: a light, dependency-free regex layer beats no coverage at all, without pulling in an NER
 model. Categories covered: email addresses, phone numbers, government-ID-shaped numbers (US
 SSN, Indian Aadhaar), credit card numbers (regex + Luhn checksum), and street addresses (a
-best-effort "<number> <words> <Street/Ave/Road/...>" heuristic — it won't catch PO boxes,
+best-effort "<number> <words> <Street/Ave/Road/...>" heuristic, so it won't catch PO boxes,
 apartment-only lines, or addresses in scripts/formats it wasn't written for).
 
 Scope: this is meant to run on user-supplied and locally-ingested text (chat input, calendar
 titles, screen descriptions) before those become part of a request to an LLM provider. It
 deliberately does NOT run on externally-fetched public data (flight search results, SEC
-filing excerpts) — those are already public facts about companies or flights, not personal
+filing excerpts). Those are already public facts about companies or flights, not personal
 data about the user, and blanket-redacting them would corrupt real public figures (a filed
 company's own listed phone number or address, a filing's real dollar amounts) for no privacy
 benefit. That split mirrors buddy.py's existing FLIGHT_LINE_RE / FILING_LINE_RE scrub
@@ -25,11 +25,11 @@ EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 
 # Candidates: either a compact/optionally-separated 10-digit US/Canada-style number
 # (optional country code, optional parens around area code), or 2+ digit groups joined by a
-# REQUIRED space/dot/dash/plus (covers most other groupings in practice — UK's 020-7946-0958,
+# REQUIRED space/dot/dash/plus (covers most other groupings in practice: UK's 020-7946-0958,
 # India's +91 98765 43210 or 098765-43210, etc.). The digit-count check in _redact_phones()
 # below is what actually decides "is this phone-shaped", not the grouping itself; a bare,
 # unseparated run of digits deliberately isn't matched here so it isn't mislabeled "phone"
-# instead of "card" — the fallback in buddy.py's own scrub() still redacts it generically.
+# instead of "card"; the fallback in buddy.py's own scrub() still redacts it generically.
 PHONE_CANDIDATE_RE = re.compile(
     r"(?<!\d)(?:\+\d{1,3}[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}(?!\d)"
     r"|(?<!\d)\+?\(?\d{2,4}\)?(?:[\s.-]\d{2,5}){1,4}(?!\d)"

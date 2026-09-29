@@ -33,7 +33,7 @@ st.set_page_config(page_title="Digital Twin Monitor", layout="wide")
 
 db_path = resolve_db_path()
 
-st.title("Digital Twin — Local Data Monitor")
+st.title("Digital Twin: Local Data Monitor")
 st.markdown(
     f"**Reading:** `{os.path.abspath(db_path)}` &nbsp;·&nbsp; "
     "**Network calls made by this process: 0** &nbsp;·&nbsp; 🔒 everything below stays on this machine"
@@ -55,12 +55,12 @@ try:
             st.subheader("Transactions")
             st.dataframe(txns, use_container_width=True, height=520, hide_index=True)
         with col2:
-            st.subheader("Access Log — what was read/touched, and when")
+            st.subheader("Access Log: what was read/touched, and when")
             st.dataframe(logs, use_container_width=True, height=520, hide_index=True)
 
 except Exception as e:
     with placeholder.container():
-        st.warning(f"Waiting for database at `{db_path}` — {e}")
+        st.warning(f"Waiting for database at `{db_path}`: {e}")
 
 st.caption(f"Polling every {POLL_SECONDS}s · no data leaves this device")
 

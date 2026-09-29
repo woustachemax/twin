@@ -4,7 +4,7 @@
 # This is a thin wrapper around `git tag` + `gh release create` that reads
 # the version from VERSION, so the git tag, the release title, and the
 # uploaded asset name can't drift from each other or from the .dmg
-# build_dmg.sh actually produced. It does NOT build the .dmg itself — run
+# build_dmg.sh actually produced. It does NOT build the .dmg itself; run
 # scripts/build_dmg.sh first (ideally with CODESIGN_IDENTITY and
 # NOTARY_PROFILE set, see docs/RELEASING.md).
 #

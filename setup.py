@@ -112,11 +112,23 @@ OPTIONS = {
         "CoreMedia",
         "CoreAudio",
     ],
+    # document_ingest.py's dependencies (PIL, pypdfium2, torch, transformers,
+    # sentencepiece, protobuf) are deliberately excluded, along with everything
+    # transitively pulled in for them (numpy, scipy, scikit-learn, sympy/mpmath,
+    # jinja2, httpx, torchgen, ...). buddy.py imports document_ingest lazily, only
+    # when /ingest is used, and shows a clear message in the packaged app rather
+    # than crashing: see INGEST_UNAVAILABLE_NOTE in buddy.py and the README's
+    # Requirements/Installation sections. Bundling that stack made the app ~980MB
+    # instead of ~150-200MB for a feature most people won't use; run from source
+    # with those packages installed to use /ingest.
     "excludes": [
-        "PIL", "streamlit", "pandas", "numpy", "pyarrow", "polars", "matplotlib", "IPython", "pytest",
-        "torch", "torchgen", "jax", "jaxlib", "onnx", "onnxruntime", "tensorflow", "sympy", "scipy",
-        "networkx", "mpmath", "fsspec", "uvloop", "httpx", "httpcore", "requests", "email_validator",
-        "setuptools", "pkg_resources", "jaraco", "more_itertools", "markupsafe", "attr", "cffi",
+        "PIL", "pypdfium2", "torch", "torchgen", "transformers", "sentencepiece",
+        "google", "numpy", "scipy", "sklearn", "sympy", "mpmath", "jinja2", "markupsafe",
+        "httpx", "httpcore", "soundfile", "librosa", "soxr", "av", "torchaudio", "torchcodec",
+        "streamlit", "pandas", "pyarrow", "polars", "matplotlib", "IPython", "pytest",
+        "jax", "jaxlib", "onnx", "onnxruntime", "tensorflow",
+        "networkx", "fsspec", "uvloop", "requests", "email_validator",
+        "setuptools", "pkg_resources", "jaraco", "more_itertools", "attr", "cffi",
     ],
 }
 

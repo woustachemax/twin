@@ -45,11 +45,11 @@ ENGINE_FAILED_MESSAGE = "I couldn't listen for your voice just now. Try again?"
 # One shared voice for every persona's spoken replies. Earlier attempts at a per-persona
 # voice/rate table (mapping each persona to a different macOS system voice, including
 # novelty voices like Fred and Jester in search of "character") made things worse, not
-# better — system TTS voices don't have the expressive range to carry personality, and
+# better: system TTS voices don't have the expressive range to carry personality, and
 # picking further and further into the novelty voice set just traded "muffled" for
 # "unpleasant to listen to." Persona character lives in the text (system prompts, replies)
 # and the icon art, not in TTS. Candidates actually auditioned for this shared voice:
-# Samantha (US, the macOS default — warm, natural, most people's baseline expectation),
+# Samantha (US, the macOS default; warm, natural, most people's baseline expectation),
 # Daniel (UK, clear and neutral, more formal register), Karen (AU, natural and clear,
 # brighter/higher pitched than Samantha). Karen was picked after listening to all three.
 SHARED_VOICE = ("Karen", 190)

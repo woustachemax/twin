@@ -29,7 +29,6 @@ sys.path.insert(0, BASE_DIR)
 import calendar_reader
 import db
 import digest
-import document_ingest
 import imessage_export
 import llm_providers
 import nudges
@@ -40,6 +39,30 @@ import travel_search
 import voice
 import screen_reader
 from llm_providers import PROVIDERS, ProviderError
+
+# document_ingest.py needs PIL, pypdfium2, torch, transformers, sentencepiece, and
+# protobuf, none of which the packaged .app bundles (see setup.py). Importing it
+# lazily, only when /ingest is actually used, keeps the app launchable for
+# everyone and confines the missing-dependency error to the one feature that
+# needs it. See README.md's Requirements table and Installation section.
+_document_ingest_module = None
+_document_ingest_import_error = None
+
+
+def _load_document_ingest():
+    global _document_ingest_module, _document_ingest_import_error
+    if _document_ingest_module is not None:
+        return _document_ingest_module
+    if _document_ingest_import_error is not None:
+        raise _document_ingest_import_error
+    try:
+        import document_ingest
+    except ImportError as e:
+        _document_ingest_import_error = e
+        raise
+    _document_ingest_module = document_ingest
+    return _document_ingest_module
+
 
 DB_PATH = db.DB_PATH
 DB_DISPLAY_PATH = DB_PATH.replace(os.path.expanduser("~"), "~", 1)
@@ -305,7 +328,7 @@ VOICE_INTRO_NOTE = (
 VOICE_STATUS_NOTE = "voice replies are {state} right now. type /voice on or /voice off to change that."
 VOICE_USAGE_NOTE = "that's /voice on or /voice off."
 REDACT_TEST_USAGE_NOTE = (
-    "Usage: /redact-test <text> — shows what would be redacted before anything reaches your "
+    "Usage: /redact-test <text>: shows what would be redacted before anything reaches your "
     "AI provider, without actually sending it anywhere. Try: /redact-test call me at "
     "555-123-4567 or email jane@example.com"
 )
@@ -372,14 +395,20 @@ DOCUMENT_ERROR_NOTES = {
     "api_error": "Something went wrong reading that document. Try again shortly.",
 }
 DOCUMENT_INGESTED_NOTE = (
-    "Got it — I read {chars} characters from {filename}. Ask me anything about it, and I'll "
+    "Got it, I read {chars} characters from {filename}. Ask me anything about it, and I'll "
     "answer from what's actually in there. Say /forget when you're done with it."
 )
 DOCUMENT_FORGOTTEN_NOTE = "Forgotten. {filename} is no longer part of our conversation."
 DOCUMENT_NONE_ACTIVE_NOTE = "There's no document loaded right now, so there's nothing to forget."
 INGEST_USAGE_NOTE = (
-    "Usage: /ingest <path> — reads a PDF or a JPG/PNG photo of a receipt or document, so you "
+    "Usage: /ingest <path>: reads a PDF or a JPG/PNG photo of a receipt or document, so you "
     "can ask about it. Try: /ingest ~/Downloads/receipt.jpg"
+)
+INGEST_UNAVAILABLE_NOTE = (
+    "Document ingestion isn't included in the downloadable app. It needs PIL, pypdfium2, torch, "
+    "transformers, sentencepiece, and protobuf installed, which would make the .dmg much bigger "
+    "for a feature most people won't use. Run Twin from source with those packages installed "
+    "(see the README's Requirements and Installation sections) to use /ingest."
 )
 
 CATEGORIES = [
@@ -997,7 +1026,7 @@ _key_window_patched = False
 
 def allow_key_window(window):
     # Tk's aqua port latches an overrideredirect window as permanently unable to become
-    # the macOS key window the moment `wm deiconify` is called on it — a deliberate default
+    # the macOS key window the moment `wm deiconify` is called on it, a deliberate default
     # since overrideredirect windows are conventionally tooltips/splash screens that
     # shouldn't steal keyboard focus. Twin's floating widget is a real input surface, so
     # that default has to be overridden. Setting the style mask doesn't undo the latch
@@ -1290,8 +1319,8 @@ class Buddy:
         root.overrideredirect(True)
         try:
             # A plain borderless NSWindow (empty stylemask) defaults canBecomeKeyWindow to
-            # NO in Cocoa, so it can be ordered front but never actually take keyboard focus
-            # — makeKeyAndOrderFront_ silently no-ops. "nonactivatingpanel" makes Tk's window
+            # NO in Cocoa, so it can be ordered front but never actually take keyboard focus.
+            # makeKeyAndOrderFront_ silently no-ops. "nonactivatingpanel" makes Tk's window
             # class treat it as key-capable without also making it steal Dock/menu-bar focus
             # from whatever app was active a moment ago.
             root.attributes("-stylemask", "nonactivatingpanel")
@@ -2016,7 +2045,10 @@ class Buddy:
         self.say(redact.summarize(redacted, findings), typing=True)
 
     def active_document_context(self):
-        return document_ingest.format_document_context(self.active_document) if self.active_document else None
+        if not self.active_document:
+            return None
+        document_ingest = _load_document_ingest()
+        return document_ingest.format_document_context(self.active_document)
 
     def handle_ingest_command(self, text):
         parts_full = text.split(None, 1)
@@ -2024,12 +2056,24 @@ class Buddy:
         if not arg:
             self.say(INGEST_USAGE_NOTE, typing=True)
             return
+        try:
+            _load_document_ingest()
+        except ImportError:
+            self.say(INGEST_UNAVAILABLE_NOTE, typing=True)
+            return
         path = os.path.expanduser(arg)
         self.busy = True
         self.say("…")
         threading.Thread(target=self.run_document_ingest, args=(path,), daemon=True).start()
 
     def run_document_ingest(self, path):
+        try:
+            document_ingest = _load_document_ingest()
+        except ImportError as e:
+            print(f"[buddy] document ingest failed: {e!r}", file=sys.stderr)
+            reply = offline_line(self.persona, "broken", self.client)
+            self.replies.put(("reply_error", reply, self.persona["done"]))
+            return
         try:
             result = document_ingest.ingest_document(path)
             con = db.get_connection()
@@ -2445,7 +2489,7 @@ class Buddy:
     def claim_key_window(self):
         # Order matters: an overrideredirect Tk window isn't the macOS key window just
         # because Tk thinks it has focus, so the app must activate and the NSWindow must
-        # become key *before* asking Tk to focus the entry — otherwise entry.focus_force()
+        # become key *before* asking Tk to focus the entry, otherwise entry.focus_force()
         # is fighting over first-responder status with whatever app was actually key.
         # Cursor placement is deliberately left alone here: a manual click should land the
         # cursor where the user clicked (Tk's own class binding handles that right after).
