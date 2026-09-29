@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Twin</title>
 <meta name="description" content="Twin is a local-first AI buddy that floats on your Mac desktop: it remembers your day, catches you up on your texts, talks back by voice, and nudges you before you forget, all on-device with DuckDB. No cloud, no accounts.">
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cellipse cx='32' cy='33' rx='29' ry='27' fill='%23c6ff4a'/%3E%3Crect x='20' y='20' width='7' height='13' rx='3.5' fill='%23111'/%3E%3Crect x='37' y='20' width='7' height='13' rx='3.5' fill='%23111'/%3E%3Cellipse cx='15' cy='38' rx='5' ry='3' fill='%23ff7ab8'/%3E%3Cellipse cx='49' cy='38' rx='5' ry='3' fill='%23ff7ab8'/%3E%3Cpath d='M27 39 Q32 45 37 39' fill='none' stroke='%23111' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
+<link id="favicon" rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cellipse cx='32' cy='33' rx='29' ry='27' fill='%23c6ff4a'/%3E%3Crect x='20' y='20' width='7' height='13' rx='3.5' fill='%23111'/%3E%3Crect x='37' y='20' width='7' height='13' rx='3.5' fill='%23111'/%3E%3Cellipse cx='15' cy='38' rx='5' ry='3' fill='%23ff7ab8'/%3E%3Cellipse cx='49' cy='38' rx='5' ry='3' fill='%23ff7ab8'/%3E%3Cpath d='M27 39 Q32 45 37 39' fill='none' stroke='%23111' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
@@ -1611,6 +1611,48 @@ footer .made {
 </footer>
 
 <script>
+(function () {
+  var faviconLink = document.getElementById("favicon");
+  if (!faviconLink) return;
+
+  var FACES = {
+    open: "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><ellipse cx='32' cy='33' rx='29' ry='27' fill='#c6ff4a'/><rect x='20' y='20' width='7' height='13' rx='3.5' fill='#111'/><rect x='37' y='20' width='7' height='13' rx='3.5' fill='#111'/><ellipse cx='15' cy='38' rx='5' ry='3' fill='#ff7ab8'/><ellipse cx='49' cy='38' rx='5' ry='3' fill='#ff7ab8'/><path d='M27 39 Q32 45 37 39' fill='none' stroke='#111' stroke-width='3' stroke-linecap='round'/></svg>",
+    blink: "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><ellipse cx='32' cy='33' rx='29' ry='27' fill='#c6ff4a'/><path d='M20 26 Q23.5 29 27 26' fill='none' stroke='#111' stroke-width='3' stroke-linecap='round'/><path d='M37 26 Q40.5 29 44 26' fill='none' stroke='#111' stroke-width='3' stroke-linecap='round'/><ellipse cx='15' cy='38' rx='5' ry='3' fill='#ff7ab8'/><ellipse cx='49' cy='38' rx='5' ry='3' fill='#ff7ab8'/><path d='M27 39 Q32 45 37 39' fill='none' stroke='#111' stroke-width='3' stroke-linecap='round'/></svg>",
+    angry: "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><ellipse cx='32' cy='33' rx='29' ry='27' fill='#ff4d4d'/><path d='M17 21 L28 26' stroke='#111' stroke-width='3' stroke-linecap='round'/><path d='M47 21 L36 26' stroke='#111' stroke-width='3' stroke-linecap='round'/><rect x='20' y='24' width='7' height='10' rx='3' fill='#111' transform='rotate(15 23.5 29)'/><rect x='37' y='24' width='7' height='10' rx='3' fill='#111' transform='rotate(-15 40.5 29)'/><ellipse cx='15' cy='41' rx='5' ry='3' fill='#ffb3b3'/><ellipse cx='49' cy='41' rx='5' ry='3' fill='#ffb3b3'/><path d='M25 45 Q32 39 39 45' fill='none' stroke='#111' stroke-width='3' stroke-linecap='round'/></svg>"
+  };
+
+  function setFace(name) {
+    faviconLink.href = "data:image/svg+xml," + encodeURIComponent(FACES[name]);
+  }
+
+  var blinkInterval = null;
+  function startBlinking() {
+    stopBlinking();
+    blinkInterval = setInterval(function () {
+      setFace("blink");
+      setTimeout(function () {
+        if (document.visibilityState === "visible") setFace("open");
+      }, 150);
+    }, 3000 + Math.random() * 2000);
+  }
+  function stopBlinking() {
+    if (blinkInterval) clearInterval(blinkInterval);
+    blinkInterval = null;
+  }
+
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "hidden") {
+      stopBlinking();
+      setFace("angry");
+    } else {
+      setFace("open");
+      startBlinking();
+    }
+  });
+
+  startBlinking();
+})();
+
 (function () {
   var clock = document.getElementById("hero-clock");
   if (!clock) return;
