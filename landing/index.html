@@ -1089,18 +1089,18 @@ footer .made {
       <a href="#features">more stuff</a>
       <a href="#personas">personas</a>
       <a href="#get">download</a>
-      <a class="gh-btn" href="https://github.com/woustachemax/digital-twin">★ github</a>
+      <a class="gh-btn" href="https://github.com/woustachemax/twin">★ github</a>
     </div>
   </nav>
 
   <header class="hero">
     <div>
-      <span class="badge">✨ v0.1.0 · you don't need python anymore</span>
+      <span class="badge">✨ v0.1.0 is here</span>
       <h1>a tiny buddy that lives on your <span class="squiggle">Mac.</span></h1>
       <p class="tagline">Twin floats on your desktop, knows roughly what you've been up to, and <b>keeps all of it on your machine.</b></p>
       <div class="cta-row">
         <a class="btn btn-primary" href="#get">download for mac ↓</a>
-        <a class="btn btn-ghost" href="https://github.com/woustachemax/digital-twin">read the source</a>
+        <a class="btn btn-ghost" href="https://github.com/woustachemax/twin">read the source</a>
       </div>
       <p class="hint">summon it anytime with <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>space</kbd><span class="hint-meta">free · open source · macOS 13+</span></p>
     </div>
@@ -1108,7 +1108,7 @@ footer .made {
     <div class="stage" aria-hidden="true">
       <div class="menubar">
         <span> Finder  File  Edit</span>
-        <span class="mb-right"><span class="mb-icon"><span class="mb-icon-ring"></span></span>🔋 11:42</span>
+        <span class="mb-right"><span class="mb-icon"><span class="mb-icon-ring"></span></span>🔋 <span id="hero-clock">11:42</span></span>
       </div>
 
       <div class="chat-cycle">
@@ -1553,8 +1553,8 @@ footer .made {
         <p>v0.1.0 · macOS 13 Ventura or later · Apple silicon · free and open source</p>
       </div>
       <div class="dl-actions">
-        <a class="btn btn-primary" href="https://github.com/woustachemax/digital-twin/releases/latest">download Twin ↓</a>
-        <span class="dl-src">or <a href="https://github.com/woustachemax/digital-twin">build it from source</a></span>
+        <a class="btn btn-primary" href="https://github.com/woustachemax/twin/releases/download/v0.1.0/Twin-0.1.0.dmg" download>download Twin ↓</a>
+        <span class="dl-src">or <a href="https://github.com/woustachemax/twin">build it from source</a></span>
       </div>
     </div>
 
@@ -1562,7 +1562,7 @@ footer .made {
       <div class="step">
         <span class="step-num">01</span>
         <h3>drag it into Applications</h3>
-        <p>Unzip the download and drop Twin into your Applications folder. That's the whole install.</p>
+        <p>Open the downloaded .dmg and drag Twin into your Applications folder. That's the whole install.</p>
       </div>
       <div class="step">
         <span class="step-num">02</span>
@@ -1611,6 +1611,20 @@ footer .made {
 </footer>
 
 <script>
+(function () {
+  var clock = document.getElementById("hero-clock");
+  if (!clock) return;
+  function tick() {
+    var now = new Date();
+    var h = now.getHours();
+    var m = now.getMinutes();
+    h = h % 12 || 12;
+    clock.textContent = h + ":" + (m < 10 ? "0" + m : m);
+  }
+  tick();
+  setInterval(tick, 15000);
+})();
+
 document.querySelectorAll("[data-gaze]").forEach(function (card) {
   var gaze = card.querySelector(".gaze");
   var eyes = card.querySelector(".eyes");
