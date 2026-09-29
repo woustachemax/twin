@@ -97,6 +97,11 @@ digital-twin/
 ├── research_search.py          SEC EDGAR filing lookup: company resolution, filing fetch, excerpt selection
 ├── run_pipeline.py             ingest: Messages -> parser -> twin.duckdb
 ├── setup.py                    py2app build script for Twin.app
+├── VERSION                     single source of truth for the app version (setup.py, build_dmg.sh, release.sh all read it)
+├── scripts/
+│   ├── build_dmg.sh            builds, signs, and packages Twin.app into a distributable .dmg
+│   ├── check_version_sync.sh   fails if landing/index.html's download link doesn't match VERSION
+│   └── release.sh              tags, pushes, and publishes a GitHub Release with the built .dmg attached
 ├── packages/
 │   ├── ingest/
 │   │   ├── imessage_export.py  reads recent messages from ~/Library/Messages/chat.db
@@ -112,10 +117,14 @@ digital-twin/
 │       └── app.py              Streamlit monitor for everything in twin.duckdb
 ├── assets/
 │   ├── icon/                   make_icon.py, Twin.icns, and a 1024px preview
+│   ├── dmg/                    make_dmg_background.py and the generated .dmg installer background
 │   └── fonts/                  Bricolage Grotesque and JetBrains Mono, with their OFL licenses
-└── landing/
-    ├── index.html              static landing page (single file, no build step)
-    └── package.json            Vercel CLI for deploying the page (the page itself has no dependencies)
+├── landing/
+│   ├── index.html              static landing page (single file, no build step)
+│   └── package.json            Vercel CLI for deploying the page (the page itself has no dependencies)
+├── LICENSE                     MIT
+└── docs/
+    └── RELEASING.md            signing, notarization, and release steps
 ```
 
 Your data lives outside the repo, in `~/.twin/`:
@@ -159,8 +168,8 @@ Python packages:
 ## Installation
 
 ```bash
-git clone https://github.com/woustachemax/digital-twin.git
-cd digital-twin
+git clone https://github.com/woustachemax/twin.git
+cd twin
 
 python3 -m venv .venv
 source .venv/bin/activate
@@ -198,6 +207,19 @@ A few things to know:
 - `setup.py` works around a few py2app issues with uv-managed Python: it raises the recursion limit, handles a built-in `zlib`, and copies the Tcl/Tk libraries into the bundle.
 
 To change the icon, edit `assets/icon/make_icon.py`, run `python3 assets/icon/make_icon.py`, and rebuild.
+
+## Building a distributable .dmg
+
+`scripts/build_dmg.sh` runs the py2app build above, signs the result, and packages it into `dist/Twin-<version>.dmg`, a normal drag-into-Applications installer with a background image and an Applications shortcut (see `assets/dmg/`):
+
+```bash
+brew install create-dmg   # optional; the script falls back to a plain hdiutil .dmg without it
+scripts/build_dmg.sh
+```
+
+With no environment variables set, this produces the same ad-hoc-signed, unnotarized build as above, just in `.dmg` form. That's fine for testing on the machine that built it, but macOS Gatekeeper will block it as "unidentified developer" on any other Mac. To produce a `.dmg` that opens cleanly for other people, you need a paid Apple Developer account and to sign and notarize the build — see [docs/RELEASING.md](docs/RELEASING.md) for exactly what to set up and how `build_dmg.sh` picks it up (`CODESIGN_IDENTITY`, `NOTARY_PROFILE`).
+
+The version number for the `.dmg` filename, the app bundle, the git tag, and the landing page's download link all come from the single `VERSION` file at the repo root — see [Versioning](docs/RELEASING.md#versioning) for how to cut a release with `scripts/release.sh` without them drifting apart.
 
 ## First run
 
@@ -551,5 +573,5 @@ It covers the pitch, the "why local" explanation, an animated features grid, per
 - Twin keeps one ingested document active at a time. Loading a new one with `/ingest` replaces the active document; older ones stay in `~/.twin/twin.duckdb` but are no longer part of the conversation until re-ingested.
 - Filing lookup only searches EDGAR's "recent" filings window, roughly the last year of a company's activity. A form type filed further back comes back as not found even if it exists.
 - Donut is fine-tuned on receipts. Extraction quality on other kinds of document photos is weaker.
-- `Twin.app` isn't notarized, so it's meant for the Mac that built it.
-- No license file yet. Until one is added, default copyright applies. The bundled fonts are under the SIL Open Font License.
+- `Twin.app` isn't signed with a Developer ID or notarized yet, so a build from `scripts/build_dmg.sh` without `CODESIGN_IDENTITY`/`NOTARY_PROFILE` set is still meant for the Mac that built it. See [docs/RELEASING.md](docs/RELEASING.md).
+- Licensed under MIT (see `LICENSE`). The bundled fonts are under the SIL Open Font License.

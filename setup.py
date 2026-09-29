@@ -11,6 +11,9 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 for package in ("ingest", "parse", "db"):
     sys.path.insert(0, os.path.join(BASE_DIR, "packages", package))
 
+with open(os.path.join(BASE_DIR, "VERSION")) as f:
+    VERSION = f.read().strip()
+
 if not hasattr(zlib, "__file__"):
     placeholder = os.path.join(BASE_DIR, "build", "zlib-is-builtin")
     os.makedirs(os.path.dirname(placeholder), exist_ok=True)
@@ -39,8 +42,8 @@ PLIST = {
     "CFBundleName": "Twin",
     "CFBundleDisplayName": "Twin",
     "CFBundleIdentifier": "dev.twin.buddy",
-    "CFBundleShortVersionString": "0.1.0",
-    "CFBundleVersion": "0.1.0",
+    "CFBundleShortVersionString": VERSION,
+    "CFBundleVersion": VERSION,
     "LSMinimumSystemVersion": "13.0",
     "LSApplicationCategoryType": "public.app-category.productivity",
     "NSHighResolutionCapable": True,
