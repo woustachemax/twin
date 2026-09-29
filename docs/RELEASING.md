@@ -1,14 +1,102 @@
 # Releasing Twin
 
-This covers signing `Twin.app` with a real Developer ID, notarizing the `.dmg`
-`scripts/build_dmg.sh` produces, and what has to be set up by hand before any
-of that can run. Nothing below can be done from an agent session — it needs
-your Apple Developer account, and the signing/notary credentials are yours to
-hold, not something to hand over or commit.
+Twin ships **ad-hoc signed** (`codesign -s -`), not signed with a paid Developer
+ID or notarized by Apple. That's a deliberate call, not a gap to fill later:
+Developer ID enrollment costs US $99/year, and that isn't worth it for a
+portfolio project without real public download volume. This covers building
+and shipping the ad-hoc signed `.dmg` as-is, and what to tell people about
+opening it. Real Developer ID signing and notarization are covered at the
+bottom, as an optional upgrade if that ever changes.
 
-## What you need to do first (one-time, in the Apple Developer portal)
+## Opening an ad-hoc signed build (Gatekeeper)
 
-1. **Enroll in the Apple Developer Program** at https://developer.apple.com/programs/ (US $99/year) if you haven't already. A free Apple ID is not enough — Developer ID certificates and notarization both require a paid membership.
+An ad-hoc signature satisfies `codesign` but not Gatekeeper's "identified
+developer" check, so the *first* launch after downloading needs one extra
+step — after that it opens normally like any other app. Two ways to do it:
+
+- **Right-click → Open**: right-click (or Control-click) `Twin.app` in
+  Applications and choose **Open**, then confirm **Open** again in the dialog
+  that appears. This is the one that actually bypasses Gatekeeper's
+  quarantine check — double-clicking it will just fail silently or show a
+  "can't be opened" dialog with no way past it.
+- **Terminal**: `xattr -cr /Applications/Twin.app` strips the quarantine
+  attribute macOS adds to anything downloaded from a browser, which has the
+  same effect without the dialog.
+
+This is the instruction to hand anyone downloading a built `.dmg` — it's also
+in the README and on the landing page, so all three should stay in sync if
+this ever changes.
+
+## Building and shipping the .dmg
+
+```bash
+brew install create-dmg   # optional; falls back to a plain hdiutil .dmg without it
+scripts/build_dmg.sh
+```
+
+With no environment variables set — the normal case — this builds `Twin.app`
+with py2app, ad-hoc signs it (`codesign -s -`), and packages it into
+`dist/Twin-<version>.dmg`. That's the build that ships. Point people at the
+[opening instructions](#opening-an-ad-hoc-signed-build-gatekeeper) above; don't
+treat the lack of a paid signature as something to apologize for or fix later.
+
+## Versioning
+
+`VERSION` (a single line at the repo root, e.g. `0.1.0`) is the one place the
+app's version lives. Everything else reads it instead of hardcoding a number:
+
+- `setup.py` reads it for `CFBundleShortVersionString`/`CFBundleVersion`.
+- `scripts/build_dmg.sh` reads it for the `.dmg` filename (`dist/Twin-<version>.dmg`).
+- `scripts/release.sh` reads it for the git tag (`v<version>`) and the release title.
+- `landing/index.html`'s download button is a direct link to that tag's asset:
+  `https://github.com/woustachemax/twin/releases/download/v<version>/Twin-<version>.dmg`.
+  Since the landing page is a single static HTML file with no build/templating
+  step, that link and the version text next to it (`v<version> · macOS...`)
+  have to be edited by hand when you bump `VERSION` — `scripts/check_version_sync.sh`
+  checks they match and fails loudly if you forget.
+
+To cut a release:
+
+1. Bump the version in `VERSION` (just that file — nothing else needs editing for the app itself).
+2. Update `landing/index.html`'s download `href` and version text to match.
+3. Run `./scripts/check_version_sync.sh` to confirm they agree.
+4. Build: `scripts/build_dmg.sh`.
+5. Publish: `scripts/release.sh`, which re-runs the version check, then tags, pushes the tag, and runs `gh release create` to upload `dist/Twin-<version>.dmg` as a release asset. It asks for confirmation before it pushes anything, since tagging and publishing a release are visible, hard-to-fully-undo actions.
+6. Deploy the landing page (`cd landing && vercel --prod` or however you currently deploy it) so the updated download link goes live.
+
+If you'd rather do the release step by hand instead of `scripts/release.sh`:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+gh release create v0.1.0 dist/Twin-0.1.0.dmg --title "Twin 0.1.0" --notes "..."
+```
+
+### Why this is a local script and not a GitHub Actions workflow
+
+`setup.py` bundles `torch` and `transformers` for the Donut OCR model
+(`document_ingest.py`), which makes the py2app build large and slow to
+resolve from scratch — exactly the kind of thing a fresh, disk-constrained,
+per-minute-billed macOS GitHub Actions runner handles worst. A local build,
+using your machine's existing pip/Homebrew caches, is the more maintainable
+default for a single-maintainer project at this scale, ad-hoc signed or not.
+If release volume ever grows enough to justify it, a `macos-latest` workflow
+is a reasonable next step — see the notarization section below for what that
+would additionally need if you also want CI to notarize.
+
+## Signing with a real Developer ID and notarizing (optional, if you want this later)
+
+Everything above is enough to ship. This section only matters if you decide
+the $99/year Apple Developer Program membership is worth it later — for
+example if Twin gets real public download volume and the Gatekeeper
+right-click step becomes enough friction to lose people. Nothing here can be
+done from an agent session — it needs your Apple Developer account, and the
+signing/notary credentials are yours to hold, not something to hand over or
+commit.
+
+### One-time setup, in the Apple Developer portal
+
+1. **Enroll in the Apple Developer Program** at https://developer.apple.com/programs/ (US $99/year). A free Apple ID is not enough — Developer ID certificates and notarization both require a paid membership.
 2. **Create a Developer ID Application certificate**: in Xcode go to Settings → Accounts → your team → Manage Certificates → + → "Developer ID Application", or generate it from https://developer.appstoreconnect.apple.com/certificates and let Keychain Access import it. This is the certificate that signs apps distributed *outside* the Mac App Store. Confirm it's in your login keychain with:
    ```bash
    security find-identity -v -p codesigning
@@ -28,9 +116,9 @@ hold, not something to hand over or commit.
 
 None of this can be scripted or faked from here — it requires your Apple ID, your payment for the developer program, and access to a device you're signed into to approve the certificate/API key creation.
 
-## What `scripts/build_dmg.sh` does once you've set that up
+### What `scripts/build_dmg.sh` does once you've set that up
 
-The script reads two environment variables. Both are optional — omit them and you get the same ad-hoc-signed, unnotarized build as before, just packaged as a `.dmg`.
+The script reads two environment variables. Both are optional — omit them and you get the same ad-hoc-signed, unnotarized build described at the top of this file.
 
 | Variable | Value | Effect |
 |---|---|---|
@@ -47,19 +135,17 @@ export NOTARY_PROFILE="twin-notary"
 scripts/build_dmg.sh
 ```
 
-Internally, for a release build, the script:
+Internally, with both set, the script additionally:
 
-1. Builds `Twin.app` with py2app (same as the plain `Building the app` step).
-2. Signs it with `codesign --force --deep --options runtime --timestamp --sign "$CODESIGN_IDENTITY"` — the hardened runtime flag is required for notarization to accept it.
-3. Verifies the signature with `codesign --verify --deep --strict`.
-4. Packages it into `dist/Twin-<version>.dmg` with `create-dmg` (or a plain `hdiutil` dmg if `create-dmg` isn't installed).
-5. Signs the `.dmg` itself.
-6. Submits it with `xcrun notarytool submit dist/Twin-<version>.dmg --keychain-profile "$NOTARY_PROFILE" --wait` and waits for Apple's response.
-7. Staples the ticket with `xcrun stapler staple dist/Twin-<version>.dmg`, so the `.dmg` opens offline without Gatekeeper needing to phone home.
+1. Signs `Twin.app` with `codesign --force --deep --options runtime --timestamp --sign "$CODESIGN_IDENTITY"` — the hardened runtime flag is required for notarization to accept it.
+2. Verifies the signature with `codesign --verify --deep --strict`.
+3. Signs the `.dmg` itself.
+4. Submits it with `xcrun notarytool submit dist/Twin-<version>.dmg --keychain-profile "$NOTARY_PROFILE" --wait` and waits for Apple's response.
+5. Staples the ticket with `xcrun stapler staple dist/Twin-<version>.dmg`, so the `.dmg` opens offline without Gatekeeper needing to phone home — and needs none of the right-click/`xattr` workaround anymore.
 
 If notarization is rejected, `notarytool` prints a log URL; the most common causes are a missing hardened-runtime entitlement or an unsigned nested binary, both of which would show up in that log.
 
-## Doing it by hand, one step at a time
+### Doing it by hand, one step at a time
 
 If you'd rather run each command yourself instead of through the script:
 
@@ -85,51 +171,3 @@ xcrun stapler staple dist/Twin-0.1.0.dmg
 # 6. Confirm Gatekeeper accepts it
 spctl -a -t open --context context:primary-signature -v dist/Twin-0.1.0.dmg
 ```
-
-## Versioning
-
-`VERSION` (a single line at the repo root, e.g. `0.1.0`) is the one place the
-app's version lives. Everything else reads it instead of hardcoding a number:
-
-- `setup.py` reads it for `CFBundleShortVersionString`/`CFBundleVersion`.
-- `scripts/build_dmg.sh` reads it for the `.dmg` filename (`dist/Twin-<version>.dmg`).
-- `scripts/release.sh` reads it for the git tag (`v<version>`) and the release title.
-- `landing/index.html`'s download button is a direct link to that tag's asset:
-  `https://github.com/woustachemax/twin/releases/download/v<version>/Twin-<version>.dmg`.
-  Since the landing page is a single static HTML file with no build/templating
-  step, that link and the version text next to it (`v<version> · macOS...`)
-  have to be edited by hand when you bump `VERSION` — `scripts/check_version_sync.sh`
-  checks they match and fails loudly if you forget.
-
-To cut a release:
-
-1. Bump the version in `VERSION` (just that file — nothing else needs editing for the app itself).
-2. Update `landing/index.html`'s download `href` and version text to match.
-3. Run `./scripts/check_version_sync.sh` to confirm they agree.
-4. Build: `scripts/build_dmg.sh` (with `CODESIGN_IDENTITY`/`NOTARY_PROFILE` set for a real release).
-5. Publish: `scripts/release.sh`, which re-runs the version check, then tags, pushes the tag, and runs `gh release create` to upload `dist/Twin-<version>.dmg` as a release asset. It asks for confirmation before it pushes anything, since tagging and publishing a release are visible, hard-to-fully-undo actions.
-6. Deploy the landing page (`cd landing && vercel --prod` or however you currently deploy it) so the updated download link goes live.
-
-If you'd rather do the release step by hand instead of `scripts/release.sh`:
-
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-gh release create v0.1.0 dist/Twin-0.1.0.dmg --title "Twin 0.1.0" --notes "..."
-```
-
-### Why this is a local script and not a GitHub Actions workflow
-
-`setup.py` bundles `torch` and `transformers` for the Donut OCR model
-(`document_ingest.py`), which makes the py2app build large and slow to
-resolve from scratch — exactly the kind of thing a fresh, disk-constrained,
-per-minute-billed macOS GitHub Actions runner handles worst, and unsigned CI
-builds still don't solve the actual blocker, since notarization needs your
-Apple Developer credentials either way. A local build, using your machine's
-existing pip/Homebrew caches and your already-configured signing identity and
-keychain profile, is the more maintainable default for a single-maintainer
-project at this scale. If release volume grows enough to justify it, a
-`macos-latest` workflow that imports a certificate from a base64-encoded
-secret and calls `notarytool`/`stapler` with API-key secrets is a reasonable
-next step — but that means putting your Developer ID private key into GitHub
-Secrets, which is a real trust decision to make deliberately, not a default.

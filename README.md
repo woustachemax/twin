@@ -124,7 +124,7 @@ digital-twin/
 │   └── package.json            Vercel CLI for deploying the page (the page itself has no dependencies)
 ├── LICENSE                     MIT
 └── docs/
-    └── RELEASING.md            signing, notarization, and release steps
+    └── RELEASING.md            ad-hoc signing, opening a downloaded build, release steps, optional notarization
 ```
 
 Your data lives outside the repo, in `~/.twin/`:
@@ -202,7 +202,7 @@ The app bundles its own Python, Tcl/Tk, fonts, and icon, so it doesn't depend on
 
 A few things to know:
 
-- The app is ad-hoc signed, not notarized. It runs on the Mac that built it. Other Macs will show a Gatekeeper warning.
+- The app is ad-hoc signed, not signed with a paid Developer ID or notarized — that's the deliberate, current shipping state, not a placeholder. On the Mac that built it, that's invisible: it just opens. On any other Mac, the first launch needs one extra step because it's downloaded/copied rather than built locally: right-click `Twin.app` → **Open** → confirm **Open** in the dialog (double-clicking alone won't get past Gatekeeper), or run `xattr -cr /Applications/Twin.app` in Terminal. See [docs/RELEASING.md](docs/RELEASING.md) for why, and what real Developer ID signing would take if that's ever worth it.
 - macOS ties permissions to the app's signature, and every rebuild gets a new one. After rebuilding, turn Twin back on under Full Disk Access, Accessibility, and Screen Recording.
 - `setup.py` works around a few py2app issues with uv-managed Python: it raises the recursion limit, handles a built-in `zlib`, and copies the Tcl/Tk libraries into the bundle.
 
@@ -217,7 +217,7 @@ brew install create-dmg   # optional; the script falls back to a plain hdiutil .
 scripts/build_dmg.sh
 ```
 
-With no environment variables set, this produces the same ad-hoc-signed, unnotarized build as above, just in `.dmg` form. That's fine for testing on the machine that built it, but macOS Gatekeeper will block it as "unidentified developer" on any other Mac. To produce a `.dmg` that opens cleanly for other people, you need a paid Apple Developer account and to sign and notarize the build — see [docs/RELEASING.md](docs/RELEASING.md) for exactly what to set up and how `build_dmg.sh` picks it up (`CODESIGN_IDENTITY`, `NOTARY_PROFILE`).
+With no environment variables set — the normal way to run it — this produces the same ad-hoc-signed build as above, just in `.dmg` form, and that's what actually ships (see the download on the [landing page](#landing-page)). Anyone opening it on a Mac other than the one that built it needs the same right-click-to-open step described above; that's expected, not a bug to chase down. `docs/RELEASING.md` covers the optional `CODESIGN_IDENTITY`/`NOTARY_PROFILE` path if a paid Developer ID account ever becomes worth it.
 
 The version number for the `.dmg` filename, the app bundle, the git tag, and the landing page's download link all come from the single `VERSION` file at the repo root — see [Versioning](docs/RELEASING.md#versioning) for how to cut a release with `scripts/release.sh` without them drifting apart.
 
@@ -573,5 +573,5 @@ It covers the pitch, the "why local" explanation, an animated features grid, per
 - Twin keeps one ingested document active at a time. Loading a new one with `/ingest` replaces the active document; older ones stay in `~/.twin/twin.duckdb` but are no longer part of the conversation until re-ingested.
 - Filing lookup only searches EDGAR's "recent" filings window, roughly the last year of a company's activity. A form type filed further back comes back as not found even if it exists.
 - Donut is fine-tuned on receipts. Extraction quality on other kinds of document photos is weaker.
-- `Twin.app` isn't signed with a Developer ID or notarized yet, so a build from `scripts/build_dmg.sh` without `CODESIGN_IDENTITY`/`NOTARY_PROFILE` set is still meant for the Mac that built it. See [docs/RELEASING.md](docs/RELEASING.md).
+- `Twin.app` ships ad-hoc signed, not signed with a paid Developer ID or notarized — a deliberate call for a portfolio project without real public download volume, not a gap to fill later. On a Mac other than the one that built it, the first launch needs right-click → Open (or `xattr -cr`) instead of a plain double-click. See [docs/RELEASING.md](docs/RELEASING.md).
 - Licensed under MIT (see `LICENSE`). The bundled fonts are under the SIL Open Font License.

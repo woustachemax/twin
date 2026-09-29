@@ -991,7 +991,7 @@ footer .made {
   color: var(--muted);
 }
 
-.persona-note code, .lede code, .fineprint code {
+.persona-note code, .lede code, .fineprint code, .step p code {
   font-family: var(--mono);
   font-size: 14px;
   background: var(--card);
@@ -1566,8 +1566,8 @@ footer .made {
       </div>
       <div class="step">
         <span class="step-num">02</span>
-        <h3>open it (once, the long way)</h3>
-        <p>Twin isn't notarized by Apple yet, so macOS will say it can't check it. Head to System Settings → Privacy &amp; Security and click Open Anyway. After that it opens like any app.</p>
+        <h3>right-click → open (first time only)</h3>
+        <p>Twin ships ad-hoc signed rather than through Apple's paid notarization, so a plain double-click won't get past Gatekeeper the first time. Right-click Twin in Applications, choose Open, then confirm Open in the dialog. (Or run <code>xattr -cr /Applications/Twin.app</code> in Terminal.) After that it opens normally, every time.</p>
       </div>
       <div class="step">
         <span class="step-num">03</span>
