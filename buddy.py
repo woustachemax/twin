@@ -2476,8 +2476,8 @@ class EdgarContactPrompt:
     filing search. Saves to config["edgar_contact"] and calls on_done(email), or on_done(None)
     if the user skips; the caller decides what happens next either way."""
 
-    WIDTH = 420
-    HEIGHT = 300
+    WIDTH = 520
+    HEIGHT = 340
     MARGIN = 20
 
     def __init__(self, root, config, save_config, on_done, colors):
