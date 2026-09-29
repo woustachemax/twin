@@ -883,6 +883,44 @@ def is_screen_question(text):
     return bool(SCREEN_QUESTION_RE.search(text.replace("\u2019", "'")))
 
 
+def strip_markdown_with_spans(text):
+    """Removes **bold** and *italic* markers and returns the plain text alongside the
+    (start, end, tag) character ranges \u2014 in the plain text's own coordinates \u2014 that should
+    be re-tagged bold/italic. Providers are told not to use markdown, but don't always
+    obey, and the bubble is a plain Tk Text widget with no markdown renderer, so without
+    this the asterisks would just show up literally. A single-pass scan rather than regex
+    since bold and italic markers interact (** vs *) and spans need output-relative offsets,
+    which a two-pass regex replace would have to re-derive anyway. An unmatched trailing
+    marker is silently dropped rather than left as a stray literal asterisk."""
+    plain = []
+    spans = []
+    bold_start = None
+    italic_start = None
+    i, n = 0, len(text)
+    while i < n:
+        if text[i] == "*" and i + 1 < n and text[i + 1] == "*":
+            if bold_start is None:
+                bold_start = len(plain)
+            else:
+                if len(plain) > bold_start:
+                    spans.append((bold_start, len(plain), "md_bold"))
+                bold_start = None
+            i += 2
+            continue
+        if text[i] == "*":
+            if italic_start is None:
+                italic_start = len(plain)
+            else:
+                if len(plain) > italic_start:
+                    spans.append((italic_start, len(plain), "md_italic"))
+                italic_start = None
+            i += 1
+            continue
+        plain.append(text[i])
+        i += 1
+    return "".join(plain), spans
+
+
 def frontmost_other_app():
     try:
         from AppKit import NSRunningApplication, NSWorkspace
@@ -954,6 +992,27 @@ def set_dock_icon(key):
     return True
 
 
+_key_window_patched = False
+
+
+def allow_key_window(window):
+    # Tk's aqua port latches an overrideredirect window as permanently unable to become
+    # the macOS key window the moment `wm deiconify` is called on it — a deliberate default
+    # since overrideredirect windows are conventionally tooltips/splash screens that
+    # shouldn't steal keyboard focus. Twin's floating widget is a real input surface, so
+    # that default has to be overridden. Setting the style mask doesn't undo the latch
+    # (verified empirically); only replacing canBecomeKeyWindow at the class level does.
+    global _key_window_patched
+    if _key_window_patched:
+        return
+    try:
+        cls = window.class__()
+        cls.canBecomeKeyWindow = lambda _self: True
+        _key_window_patched = True
+    except Exception:
+        pass
+
+
 def apply_macos_chrome(root, background, edge, width, height):
     try:
         import AppKit
@@ -970,6 +1029,7 @@ def apply_macos_chrome(root, background, edge, width, height):
         if not windows:
             return None, None
         window = windows[-1]
+        allow_key_window(window)
         content = window.contentView()
         bounds = content.frame()
         sizing = AppKit.NSViewWidthSizable | AppKit.NSViewHeightSizable
@@ -1136,6 +1196,7 @@ class Buddy:
         self.blink_until = 0.0
         self.status_until = 0.0
         self.typing_job = None
+        self.pending_md_spans = []
         self.nswindow = None
         self.set_chrome = None
         self.previous_app = None
@@ -1159,7 +1220,11 @@ class Buddy:
         self.calendar = CalendarCache()
         self.recording = False
         self.voice_stop_event = None
-        self.voice_enabled = self.config.get("voice_enabled", True)
+        # Opt-in: voice replies are off unless the user has explicitly turned them on with
+        # /voice on, which is the only thing that writes config["voice_enabled"]. A fresh
+        # config (no key at all) or one written before this default flipped both fall
+        # through to False here, i.e. silent/text-only, same as an explicit /voice off.
+        self.voice_enabled = self.config.get("voice_enabled", False)
         self.voice_proc = None
         self.wake_listener = voice.WakeWordListener(
             get_pattern=lambda: voice.wake_pattern(self.persona["name"]),
@@ -1224,7 +1289,12 @@ class Buddy:
         root = self.root
         root.overrideredirect(True)
         try:
-            root.attributes("-stylemask", "")
+            # A plain borderless NSWindow (empty stylemask) defaults canBecomeKeyWindow to
+            # NO in Cocoa, so it can be ordered front but never actually take keyboard focus
+            # — makeKeyAndOrderFront_ silently no-ops. "nonactivatingpanel" makes Tk's window
+            # class treat it as key-capable without also making it steal Dock/menu-bar focus
+            # from whatever app was active a moment ago.
+            root.attributes("-stylemask", "nonactivatingpanel")
         except tk.TclError:
             pass
         root.attributes("-topmost", True)
@@ -1288,6 +1358,8 @@ class Buddy:
         self.bubble.tag_configure("menu_gap", font=(self.family, 6))
         self.bubble.tag_configure("menu_name", font=(self.family, 13, "bold"), spacing1=4, spacing2=0)
         self.bubble.tag_configure("menu", font=(self.family, 13), spacing2=0)
+        self.bubble.tag_configure("md_bold", font=(self.family, 14, "bold"))
+        self.bubble.tag_configure("md_italic", font=(self.family, 14, "italic"))
         self.bubble_window = canvas.create_window(0, 0, anchor="nw", window=self.bubble)
 
         self.entry = tk.Entry(canvas, bd=0, highlightthickness=0, relief="flat", font=(self.family, 14))
@@ -1306,6 +1378,10 @@ class Buddy:
         self.entry.bind("<Return>", self.submit)
         root.bind("<Escape>", lambda _e: self.hide())
         root.bind("<Command-q>", lambda _e: root.destroy())
+        # A borderless Tk window can lose macOS key-window status (e.g. to whatever app
+        # was clicked in between) without losing Tk's own notion of focus, so a plain click
+        # here doesn't otherwise guarantee typed characters actually reach the entry.
+        self.entry.bind("<Button-1>", lambda _e: self.claim_key_window(), add="+")
         canvas.bind("<ButtonPress-1>", self.start_drag)
         canvas.bind("<B1-Motion>", self.drag)
         canvas.bind("<ButtonRelease-1>", self.end_drag)
@@ -1810,11 +1886,24 @@ class Buddy:
         self.bubble.config(state="normal")
         self.bubble.delete("1.0", "end")
         self.bubble.config(state="disabled")
+        message, self.pending_md_spans = strip_markdown_with_spans(message)
         if typing:
             self.type_out(message, 0)
         else:
             self.append(message)
+            self.apply_md_spans()
             self.render_menu()
+
+    def apply_md_spans(self):
+        spans, self.pending_md_spans = self.pending_md_spans, []
+        if not spans:
+            return
+        self.bubble.config(state="normal")
+        for start, end, tag in spans:
+            # "1.0 + N chars" (not "1.N") since Tk Text indices are line.column and the
+            # message may contain newlines the raw character offsets don't account for.
+            self.bubble.tag_add(tag, f"1.0+{start}c", f"1.0+{end}c")
+        self.bubble.config(state="disabled")
 
     def render_menu(self):
         menu, self.menu_after_typing = self.menu_after_typing, None
@@ -1852,6 +1941,7 @@ class Buddy:
             self.typing_job = self.root.after(16, self.type_out, message, index + 3)
         else:
             self.typing_job = None
+            self.apply_md_spans()
             self.render_menu()
 
     def set_status(self, text, hold=0.0):
@@ -2284,7 +2374,8 @@ class Buddy:
                 if kind in ("reply", "reply_error", "reply_screen") and self.voice_enabled:
                     voice.stop_speaking()
                     try:
-                        self.voice_proc = voice.speak(message, self.persona_key)
+                        spoken, _ = strip_markdown_with_spans(message)
+                        self.voice_proc = voice.speak(spoken, self.persona_key)
                     except voice.VoiceOutputError as e:
                         print(f"[buddy] voice output failed: {e!r}", file=sys.stderr)
                 if status:
@@ -2351,6 +2442,19 @@ class Buddy:
         else:
             self.show()
 
+    def claim_key_window(self):
+        # Order matters: an overrideredirect Tk window isn't the macOS key window just
+        # because Tk thinks it has focus, so the app must activate and the NSWindow must
+        # become key *before* asking Tk to focus the entry — otherwise entry.focus_force()
+        # is fighting over first-responder status with whatever app was actually key.
+        # Cursor placement is deliberately left alone here: a manual click should land the
+        # cursor where the user clicked (Tk's own class binding handles that right after).
+        activate_app()
+        if self.nswindow is not None:
+            self.nswindow.makeKeyAndOrderFront_(None)
+        self.root.focus_force()
+        self.entry.focus_force()
+
     def show(self):
         self.visible = True
         app = frontmost_other_app()
@@ -2359,9 +2463,9 @@ class Buddy:
         self.root.deiconify()
         self.root.lift()
         self.root.attributes("-topmost", True)
-        activate_app()
-        self.root.focus_force()
-        self.entry.focus_set()
+        self.claim_key_window()
+        self.entry.selection_clear()
+        self.entry.icursor(0 if self.placeholder else "end")
         if self.nswindow is not None:
             self.root.after(50, self.nswindow.invalidateShadow)
 

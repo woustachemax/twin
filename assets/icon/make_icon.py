@@ -22,8 +22,10 @@ CHEEK = (255, 122, 184)
 GROUND = (12, 11, 16)
 
 PERSONA_ICONS = {
-    "gengar": {"background": "#17111F", "accent": "#A77BFF", "text": "#EEE8F7", "eyes": "#FF4F6E", "avatar": "ghost"},
-    "ember": {"background": "#1E120D", "accent": "#FF7A3D", "text": "#FFEDE4", "eyes": "#FFD166", "avatar": "ghost"},
+    "gengar": {"background": "#17111F", "accent": "#A77BFF", "text": "#EEE8F7", "eyes": "#FF4F6E", "avatar": "ghost",
+               "expression": "sly"},
+    "ember": {"background": "#1E120D", "accent": "#FF7A3D", "text": "#FFEDE4", "eyes": "#FFD166", "avatar": "ghost",
+              "expression": "excited"},
     "calm": {"background": "#141828", "accent": "#A5B4FF", "text": "#E7EBFA", "eyes": "#141828", "avatar": "ghost"},
     "plain": {"background": "#1E1E20", "accent": "#8E8E93", "text": "#F2F2F7", "eyes": "#1E1E20", "avatar": "monogram",
               "letter": "A"},
@@ -128,6 +130,82 @@ def blend(a, b, amount):
     return tuple(round(x * (1 - amount) + y * amount) for x, y in zip(rgb(a), rgb(b)))
 
 
+def bezier_points(p0, p1, p2, p3, steps=24):
+    points = []
+    for i in range(steps + 1):
+        t = i / steps
+        mt = 1 - t
+        x = mt ** 3 * p0[0] + 3 * mt ** 2 * t * p1[0] + 3 * mt * t ** 2 * p2[0] + t ** 3 * p3[0]
+        y = mt ** 3 * p0[1] + 3 * mt ** 2 * t * p1[1] + 3 * mt * t ** 2 * p2[1] + t ** 3 * p3[1]
+        points.append((x, y))
+    return points
+
+
+def draw_face(image, draw, left, top, width, height, eye_color, pixels, expression):
+    """Draws the ghost's eyes and mouth. "content" is the original symmetric
+    round-eyes-plus-gentle-smile look every persona used to share regardless of its written
+    personality. "sly" and "excited" give gengar and ember their own actual expression
+    instead of only differing by fill color, built from the same primitive shapes (rounded
+    rectangles, a bezier stroke) so they still come out of this one generator rather than a
+    one-off hand-drawn asset."""
+    if expression == "sly":
+        # Asymmetric on purpose: a raised, narrowed "scheming" eye on one side and a
+        # half-closed wink on the other reads as mischief in a way two identical eyes can't.
+        eye_w, eye_h = width * 0.115, height * 0.20
+        eye_specs = [(0.335, 1.0, 8, 0.40), (0.665, 0.48, -10, 0.34)]
+        for fx, h_scale, angle, y_frac in eye_specs:
+            ew, eh = eye_w, eye_h * h_scale
+            pad = max(ew, eh)
+            layer = Image.new("RGBA", (int(ew + pad), int(eh + pad)), (0, 0, 0, 0))
+            ImageDraw.Draw(layer).rounded_rectangle(
+                (pad / 2, pad / 2, pad / 2 + ew, pad / 2 + eh), radius=ew / 2, fill=eye_color,
+            )
+            layer = layer.rotate(angle, resample=Image.BICUBIC, expand=True)
+            ex, ey = left + width * fx, top + height * y_frac
+            box = (round(ex - layer.width / 2), round(ey - layer.height / 2))
+            image.paste(layer, box, layer)
+        if pixels >= 48:
+            mouth = width * 0.24
+            mx, my = left + width * 0.47, top + height * 0.575
+            stroke = max(1, round(width * 0.032))
+            # One corner low and flat, the other pulled sharply up: a smirk, not a smile.
+            points = bezier_points(
+                (mx - mouth / 2, my + mouth * 0.06),
+                (mx - mouth * 0.08, my + mouth * 0.22),
+                (mx + mouth * 0.18, my - mouth * 0.05),
+                (mx + mouth / 2, my - mouth * 0.42),
+            )
+            draw.line(points, fill=eye_color, width=stroke, joint="curve")
+            r = stroke / 2
+            for px, py in (points[0], points[-1]):
+                draw.ellipse((px - r, py - r, px + r, py + r), fill=eye_color)
+    elif expression == "excited":
+        # Bigger, rounder eyes and a wide open grin (a filled shape, not just an outline)
+        # for a persona that's supposed to read as bright and enthusiastic, not just "happy."
+        eye_w, eye_h = width * 0.125, height * 0.225
+        for fx in (0.33, 0.67):
+            ex, ey = left + width * fx, top + height * 0.415
+            draw.rounded_rectangle((ex - eye_w / 2, ey - eye_h / 2, ex + eye_w / 2, ey + eye_h / 2),
+                                   radius=eye_w / 2, fill=eye_color)
+        if pixels >= 48:
+            # A wide open oval, not a smile outline: reads as an open cheer/laugh rather
+            # than a flat "surprised" slot the way a straight-edged rounded rect did.
+            mouth_w, mouth_h = width * 0.30, height * 0.20
+            mx, my = left + width / 2, top + height * 0.59
+            draw.ellipse((mx - mouth_w / 2, my - mouth_h / 2, mx + mouth_w / 2, my + mouth_h / 2), fill=eye_color)
+    else:
+        eye_w, eye_h = width * 0.11, height * 0.19
+        for fx in (0.33, 0.67):
+            ex, ey = left + width * fx, top + height * 0.42
+            draw.rounded_rectangle((ex - eye_w / 2, ey - eye_h / 2, ex + eye_w / 2, ey + eye_h / 2),
+                                   radius=eye_w / 2, fill=eye_color)
+        if pixels >= 48:
+            mouth = width * 0.2
+            mx, my = left + width / 2, top + height * 0.56
+            draw.arc((mx - mouth / 2, my - mouth / 2, mx + mouth / 2, my + mouth / 2), start=20, end=160,
+                     fill=eye_color, width=max(1, round(width * 0.03)))
+
+
 def ghost_polygon(left, top, width, height, waves=3, steps=24):
     radius = width / 2
     points = []
@@ -170,16 +248,7 @@ def render_persona(pixels, spec):
         ImageDraw.Draw(clip).polygon(ghost_polygon(left, top, width, height), fill=255)
         fill(image, ImageChops.multiply(body, clip), accent)
         eye = rgb(spec["eyes"]) + (255,)
-        eye_w, eye_h = width * 0.11, height * 0.19
-        for fx in (0.33, 0.67):
-            ex, ey = left + width * fx, top + height * 0.42
-            draw.rounded_rectangle((ex - eye_w / 2, ey - eye_h / 2, ex + eye_w / 2, ey + eye_h / 2),
-                                   radius=eye_w / 2, fill=eye)
-        if pixels >= 48:
-            mouth = width * 0.2
-            mx, my = left + width / 2, top + height * 0.56
-            draw.arc((mx - mouth / 2, my - mouth / 2, mx + mouth / 2, my + mouth / 2), start=20, end=160,
-                     fill=eye, width=max(1, round(width * 0.03)))
+        draw_face(image, draw, left, top, width, height, eye, pixels, spec.get("expression"))
     else:
         diameter = size * 0.5
         draw.ellipse((cx - diameter / 2, cy - diameter / 2, cx + diameter / 2, cy + diameter / 2),

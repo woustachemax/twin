@@ -42,14 +42,17 @@ RECORD_FAILED_MESSAGE = "I couldn't start recording just now. Try again?"
 TRANSCRIBE_TIMEOUT_MESSAGE = "That took too long to make out. Try a shorter question?"
 ENGINE_FAILED_MESSAGE = "I couldn't listen for your voice just now. Try again?"
 
-PERSONA_VOICES = {
-    "twin": ("Samantha", 195),
-    "gengar": ("Fred", 172),
-    "ember": ("Samantha", 218),
-    "calm": ("Moira", 162),
-    "plain": ("Daniel", 186),
-}
-DEFAULT_VOICE = ("Samantha", 190)
+# One shared voice for every persona's spoken replies. Earlier attempts at a per-persona
+# voice/rate table (mapping each persona to a different macOS system voice, including
+# novelty voices like Fred and Jester in search of "character") made things worse, not
+# better — system TTS voices don't have the expressive range to carry personality, and
+# picking further and further into the novelty voice set just traded "muffled" for
+# "unpleasant to listen to." Persona character lives in the text (system prompts, replies)
+# and the icon art, not in TTS. Candidates actually auditioned for this shared voice:
+# Samantha (US, the macOS default — warm, natural, most people's baseline expectation),
+# Daniel (UK, clear and neutral, more formal register), Karen (AU, natural and clear,
+# brighter/higher pitched than Samantha). Karen was picked after listening to all three.
+SHARED_VOICE = ("Karen", 190)
 
 
 class VoiceInputError(Exception):
@@ -392,14 +395,10 @@ class WakeWordListener:
         self._cancel_task()
 
 
-def voice_for(persona_key):
-    return PERSONA_VOICES.get(persona_key, DEFAULT_VOICE)
-
-
-def speak(text, persona_key):
+def speak(text, persona_key=None):
     if not text.strip():
         return None
-    voice, rate = voice_for(persona_key)
+    voice, rate = SHARED_VOICE
     try:
         return subprocess.Popen(
             ["say", "-v", voice, "-r", str(rate), text], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,

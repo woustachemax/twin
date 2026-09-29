@@ -58,7 +58,7 @@ This started as a hackathon project. It's about 3,500 lines of Python and meant 
 
 6. **Catch-up.** Ask "what did I miss?" or "catch me up" and Twin counts today's incoming messages by vague topic (plans, payments, travel, appointments, work, deliveries, bank alerts, other) and answers with something like "Today you got a few messages about plans and one message about a payment. Nothing looks urgent." It's built on your Mac from counts only, never quotes a message, and makes no provider request, so it works without an API key.
 
-7. **Voice.** Hold Cmd+Shift+V, or hold the small dot next to the input field, and say something. Twin records while you hold it, turns it into text on-device with Apple's Speech framework, and runs it through the same `submit()` flow as anything you type, so it gets the same scrubbing and the same answer. Replies are read back with macOS's built-in `say`, in a voice and rate that vary a little by persona, unless you turn that off with `/voice off`. The first time you use it, Twin explains what's about to happen before macOS asks for Microphone and Speech Recognition access. If either is denied, Twin says so in the bubble instead of failing silently, and never sends audio or transcribed text anywhere except the same redacted request that already goes to your provider for typed messages.
+7. **Voice.** Hold Cmd+Shift+V, or hold the small dot next to the input field, and say something. Twin records while you hold it, turns it into text on-device with Apple's Speech framework, and runs it through the same `submit()` flow as anything you type, so it gets the same scrubbing and the same answer. This works regardless of whether spoken replies are on. Reading replies back out loud with macOS's built-in `say` is opt-in and off by default: turn it on with `/voice on` for that session, or off again with `/voice off`. When it's on, every persona shares the same voice, since persona character lives in what's written, not in text-to-speech. The first time you use voice input, Twin explains what's about to happen before macOS asks for Microphone and Speech Recognition access. If either is denied, Twin says so in the bubble instead of failing silently, and never sends audio or transcribed text anywhere except the same redacted request that already goes to your provider for typed messages.
 
 Filing lookup and document ingestion follow a separate path:
 
@@ -250,7 +250,7 @@ Closing the window before finishing quits Twin, and it starts from step 1 next t
 | Stop referencing that document | `/forget` |
 | Check what would be redacted before sending | `/redact-test <text>` |
 | Talk instead of typing | hold Cmd+Shift+V, or hold the dot by the input field |
-| Turn spoken replies on or off | `/voice on`, `/voice off` |
+| Turn spoken replies on (off by default) or off | `/voice on`, `/voice off` |
 
 Twin fills in context on its own. Ask "what should I be doing?" and it may mention your next calendar event. Ask "have I been spending a lot?" and it answers from the vague summary, never with amounts.
 
