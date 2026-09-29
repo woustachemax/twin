@@ -729,9 +729,111 @@ h2 {
 .dl-meta h3 { font-size: 32px; letter-spacing: -0.03em; line-height: 1.1; margin-bottom: 6px; }
 .dl-meta p { font-family: var(--mono); font-size: 13px; color: var(--muted); }
 
-.dl-actions { margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
 .dl-src { font-size: 14px; color: var(--muted); }
 .dl-src a { color: var(--text); }
+
+.install-tabs { display: flex; gap: 8px; margin-top: 28px; }
+
+.install-tab {
+  font-family: var(--mono);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 10px 18px;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.install-tab:hover { color: var(--text); border-color: var(--muted); }
+
+.install-tab.active {
+  color: #111;
+  background: var(--lime);
+  border-color: var(--lime);
+}
+
+.install-panel {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 26px 28px;
+  margin-top: 14px;
+}
+
+.install-lede { color: var(--muted); font-size: 15px; margin-bottom: 18px; }
+.install-lede code { font-family: var(--mono); font-size: 14px; background: var(--bg); border: 1px solid var(--line); padding: 2px 7px; border-radius: 6px; }
+
+.cmd-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+  overflow-x: auto;
+}
+
+.cmd-row code { font-family: var(--mono); font-size: 14px; color: var(--lime); white-space: pre; flex: 1; }
+
+.copy-btn {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 7px 14px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.copy-btn:hover, .copy-btn.copied { border-color: var(--lime); color: var(--lime); }
+
+.manual-actions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 20px; }
+
+.manual-steps {
+  list-style: none;
+  counter-reset: manual-step;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.manual-steps li {
+  counter-increment: manual-step;
+  position: relative;
+  padding-left: 36px;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.manual-steps li::before {
+  content: counter(manual-step);
+  position: absolute;
+  left: 0;
+  top: -1px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1.5px dashed #c6ff4a66;
+  color: var(--lime);
+  font-family: var(--mono);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.manual-steps li strong { color: var(--text); }
+.manual-steps li code { font-family: var(--mono); font-size: 14px; background: var(--bg); border: 1px solid var(--line); padding: 2px 7px; border-radius: 6px; }
 
 .steps {
   display: grid;
@@ -1058,7 +1160,8 @@ footer .made {
   .nav-links a:not(.gh-btn) { display: none; }
   section { padding: 56px 0; }
   .dl-card { flex-direction: column; align-items: flex-start; }
-  .dl-actions { margin-left: 0; align-items: flex-start; }
+  .cmd-row { flex-direction: column; align-items: stretch; }
+  .manual-actions { flex-direction: column; align-items: flex-start; }
   .steps { grid-template-columns: 1fr; }
   .f-screen, .f-providers { grid-column: auto; }
 }
@@ -1552,22 +1655,48 @@ footer .made {
         <h3>Twin for Mac</h3>
         <p>v0.1.0 · macOS 13 Ventura or later · Apple silicon · free and open source</p>
       </div>
-      <div class="dl-actions">
+    </div>
+
+    <div class="install-tabs" role="tablist">
+      <button type="button" class="install-tab active" role="tab" aria-selected="true" aria-controls="install-panel-quick" data-install-tab="quick">quick install</button>
+      <button type="button" class="install-tab" role="tab" aria-selected="false" aria-controls="install-panel-manual" data-install-tab="manual">manual download</button>
+    </div>
+
+    <div class="install-panel" id="install-panel-quick" role="tabpanel" data-install-panel="quick">
+      <p class="install-lede">One command: downloads the latest <code>.dmg</code>, mounts it, copies Twin into Applications, and clears the quarantine flag so Gatekeeper doesn't block the first launch.</p>
+      <div class="cmd-row">
+        <code id="install-cmd">curl -fsSL https://raw.githubusercontent.com/woustachemax/twin/main/scripts/install.sh | bash</code>
+        <button type="button" class="copy-btn" data-copy-target="install-cmd">copy</button>
+      </div>
+      <p class="dl-src">Not keen on piping a script from the internet into bash? Fair enough, <a href="#get" data-install-tab-link="manual">download the .dmg manually</a> instead.</p>
+    </div>
+
+    <div class="install-panel" id="install-panel-manual" role="tabpanel" data-install-panel="manual" hidden>
+      <div class="manual-actions">
         <a class="btn btn-primary" href="https://github.com/woustachemax/twin/releases/download/v0.1.0/Twin-0.1.0.dmg" download>download Twin ↓</a>
         <span class="dl-src">or <a href="https://github.com/woustachemax/twin">build it from source</a></span>
       </div>
+      <p class="install-lede">Twin ships ad-hoc signed, not notarized by Apple, so the first launch after a manual download gets blocked. Here's how to clear it:</p>
+      <ol class="manual-steps">
+        <li>Open the downloaded <code>.dmg</code> and drag Twin into your Applications folder.</li>
+        <li>Double-click Twin. macOS blocks it: <strong>"Twin can't be opened because Apple cannot check it for malicious software."</strong> Click Done.</li>
+        <li>Open <strong>System Settings → Privacy &amp; Security</strong>.</li>
+        <li>Scroll down to the Security section. You'll see <strong>"Twin was blocked to protect your Mac"</strong> with an <strong>Open Anyway</strong> button next to it.</li>
+        <li>Click <strong>Open Anyway</strong>, then confirm <strong>Open</strong> in the dialog that follows (Touch ID or your password may be requested).</li>
+      </ol>
+      <p class="dl-src">Or skip all of this with <code>xattr -cr /Applications/Twin.app</code> in Terminal after dragging it in.</p>
     </div>
 
     <div class="steps">
       <div class="step">
         <span class="step-num">01</span>
-        <h3>drag it into Applications</h3>
-        <p>Open the downloaded .dmg and drag Twin into your Applications folder. That's the whole install.</p>
+        <h3>get it onto your Mac</h3>
+        <p>Run the quick install command above, or drag the manually downloaded .dmg into Applications. Either way, Twin.app ends up in your Applications folder.</p>
       </div>
       <div class="step">
         <span class="step-num">02</span>
-        <h3>right-click → open (first time only)</h3>
-        <p>Twin ships ad-hoc signed rather than through Apple's paid notarization, so a plain double-click won't get past Gatekeeper the first time. Right-click Twin in Applications, choose Open, then confirm Open in the dialog. (Or run <code>xattr -cr /Applications/Twin.app</code> in Terminal.) After that it opens normally, every time.</p>
+        <h3>first launch</h3>
+        <p>Quick install already cleared Gatekeeper for you, so it just opens. Downloaded manually? See the Open Anyway steps above the first time you launch it.</p>
       </div>
       <div class="step">
         <span class="step-num">03</span>
@@ -1685,6 +1814,64 @@ document.querySelectorAll("[data-gaze]").forEach(function (card) {
     card.classList.remove("tracking");
   });
 });
+
+(function () {
+  var tabs = document.querySelectorAll("[data-install-tab]");
+  var panels = document.querySelectorAll("[data-install-panel]");
+  if (!tabs.length) return;
+
+  function show(name) {
+    tabs.forEach(function (t) {
+      var active = t.dataset.installTab === name;
+      t.classList.toggle("active", active);
+      t.setAttribute("aria-selected", active ? "true" : "false");
+    });
+    panels.forEach(function (p) {
+      p.hidden = p.dataset.installPanel !== name;
+    });
+  }
+
+  tabs.forEach(function (t) {
+    t.addEventListener("click", function () { show(t.dataset.installTab); });
+  });
+
+  document.querySelectorAll("[data-install-tab-link]").forEach(function (link) {
+    link.addEventListener("click", function (e) {
+      e.preventDefault();
+      show(link.dataset.installTabLink);
+    });
+  });
+
+  document.querySelectorAll("[data-copy-target]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var target = document.getElementById(btn.dataset.copyTarget);
+      if (!target) return;
+      var text = target.textContent;
+      var original = btn.textContent;
+      function done() {
+        btn.textContent = "copied!";
+        btn.classList.add("copied");
+        setTimeout(function () {
+          btn.textContent = original;
+          btn.classList.remove("copied");
+        }, 1800);
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, done);
+      } else {
+        var ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand("copy"); } catch (err) {}
+        document.body.removeChild(ta);
+        done();
+      }
+    });
+  });
+})();
 </script>
 </body>
 </html>

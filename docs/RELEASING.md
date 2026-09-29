@@ -12,16 +12,25 @@ bottom, as an optional upgrade if that ever changes.
 
 An ad-hoc signature satisfies `codesign` but not Gatekeeper's "identified
 developer" check, so the *first* launch after downloading needs one extra
-step — after that it opens normally like any other app. Two ways to do it:
+step — after that it opens normally like any other app. Three ways to do it:
 
-- **Right-click → Open**: right-click (or Control-click) `Twin.app` in
-  Applications and choose **Open**, then confirm **Open** again in the dialog
-  that appears. This is the one that actually bypasses Gatekeeper's
-  quarantine check — double-clicking it will just fail silently or show a
-  "can't be opened" dialog with no way past it.
+- **`scripts/install.sh`** (recommended): downloads the latest release's
+  `.dmg` via `curl`, not a browser, so it never picks up the quarantine
+  attribute in the first place, and it also runs `xattr -cr` on the installed
+  app as a belt-and-suspenders step. No Gatekeeper block, no manual steps.
+  See the one-liner in the README's [Installing a release
+  build](../README.md#installing-a-release-build) section.
+- **System Settings** (manual `.dmg` download, current macOS): double-clicking
+  a freshly-downloaded `Twin.app` shows "Twin can't be opened because Apple
+  cannot check it for malicious software," with no bypass in that dialog
+  itself. Open **System Settings → Privacy & Security**, scroll to the
+  Security section, and click **Open Anyway** next to the blocked-app notice,
+  then confirm **Open** in the dialog that follows. (Right-click → Open used
+  to surface its own bypass dialog directly; recent macOS versions route it
+  through System Settings instead.)
 - **Terminal**: `xattr -cr /Applications/Twin.app` strips the quarantine
-  attribute macOS adds to anything downloaded from a browser, which has the
-  same effect without the dialog.
+  attribute a browser download adds, which has the same effect without
+  touching System Settings.
 
 This is the instruction to hand anyone downloading a built `.dmg` — it's also
 in the README and on the landing page, so all three should stay in sync if
@@ -88,8 +97,8 @@ would additionally need if you also want CI to notarize.
 
 Everything above is enough to ship. This section only matters if you decide
 the $99/year Apple Developer Program membership is worth it later — for
-example if Twin gets real public download volume and the Gatekeeper
-right-click step becomes enough friction to lose people. Nothing here can be
+example if Twin gets real public download volume and the manual-download
+Gatekeeper block becomes enough friction to lose people. Nothing here can be
 done from an agent session — it needs your Apple Developer account, and the
 signing/notary credentials are yours to hold, not something to hand over or
 commit.

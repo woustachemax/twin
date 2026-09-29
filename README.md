@@ -202,7 +202,7 @@ The app bundles its own Python, Tcl/Tk, fonts, and icon, so it doesn't depend on
 
 A few things to know:
 
-- The app is ad-hoc signed, not signed with a paid Developer ID or notarized — that's the deliberate, current shipping state, not a placeholder. On the Mac that built it, that's invisible: it just opens. On any other Mac, the first launch needs one extra step because it's downloaded/copied rather than built locally: right-click `Twin.app` → **Open** → confirm **Open** in the dialog (double-clicking alone won't get past Gatekeeper), or run `xattr -cr /Applications/Twin.app` in Terminal. See [docs/RELEASING.md](docs/RELEASING.md) for why, and what real Developer ID signing would take if that's ever worth it.
+- The app is ad-hoc signed, not signed with a paid Developer ID or notarized — that's the deliberate, current shipping state, not a placeholder. On the Mac that built it, that's invisible: it just opens. On any other Mac, the first launch needs clearing Gatekeeper's block — see [Installing a release build](#installing-a-release-build) for the one-line install script (which clears it for you) or the manual steps. See [docs/RELEASING.md](docs/RELEASING.md) for why, and what real Developer ID signing would take if that's ever worth it.
 - macOS ties permissions to the app's signature, and every rebuild gets a new one. After rebuilding, turn Twin back on under Full Disk Access, Accessibility, and Screen Recording.
 - `setup.py` works around a few py2app issues with uv-managed Python: it raises the recursion limit, handles a built-in `zlib`, and copies the Tcl/Tk libraries into the bundle.
 
@@ -217,9 +217,30 @@ brew install create-dmg   # optional; the script falls back to a plain hdiutil .
 scripts/build_dmg.sh
 ```
 
-With no environment variables set — the normal way to run it — this produces the same ad-hoc-signed build as above, just in `.dmg` form, and that's what actually ships (see the download on the [landing page](#landing-page)). Anyone opening it on a Mac other than the one that built it needs the same right-click-to-open step described above; that's expected, not a bug to chase down. `docs/RELEASING.md` covers the optional `CODESIGN_IDENTITY`/`NOTARY_PROFILE` path if a paid Developer ID account ever becomes worth it.
+With no environment variables set — the normal way to run it — this produces the same ad-hoc-signed build as above, just in `.dmg` form, and that's what actually ships (see the download on the [landing page](#landing-page)). Anyone opening it on a Mac other than the one that built it needs to clear Gatekeeper's block the same way described in [Installing a release build](#installing-a-release-build); that's expected, not a bug to chase down. `docs/RELEASING.md` covers the optional `CODESIGN_IDENTITY`/`NOTARY_PROFILE` path if a paid Developer ID account ever becomes worth it.
 
 The version number for the `.dmg` filename, the app bundle, the git tag, and the landing page's download link all come from the single `VERSION` file at the repo root — see [Versioning](docs/RELEASING.md#versioning) for how to cut a release with `scripts/release.sh` without them drifting apart.
+
+## Installing a release build
+
+This is for anyone who just wants to run Twin, not build it from source.
+
+**Quick install (recommended):**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/woustachemax/twin/main/scripts/install.sh | bash
+```
+
+`scripts/install.sh` downloads the latest release's `.dmg` from GitHub, mounts it, copies `Twin.app` into `/Applications`, and clears the quarantine flag so Gatekeeper doesn't block the first launch. It's safe to re-run — an existing install is replaced, not skipped — and it fails loudly (clear error, non-zero exit) if any step doesn't work rather than continuing silently.
+
+**Manual download**, if you'd rather not pipe a script into `bash`: grab the `.dmg` from the [latest release](https://github.com/woustachemax/twin/releases/latest), drag `Twin.app` into Applications, then clear the first-launch block yourself:
+
+1. Double-click Twin. macOS blocks it: "Twin can't be opened because Apple cannot check it for malicious software." Click Done.
+2. Open **System Settings → Privacy & Security**.
+3. Scroll down to the Security section. You'll see "Twin was blocked to protect your Mac" with an **Open Anyway** button next to it.
+4. Click **Open Anyway**, then confirm **Open** in the dialog that follows (Touch ID or your password may be requested).
+
+Or skip that with `xattr -cr /Applications/Twin.app` in Terminal after dragging it in.
 
 ## First run
 
@@ -542,7 +563,7 @@ The Streamlit monitor described [above](#local-data-monitor).
 open landing/index.html
 ```
 
-It covers the pitch, the "why local" explanation, an animated features grid, persona preview cards, and install steps with copy buttons. Animations respect the "reduce motion" system setting.
+It covers the pitch, the "why local" explanation, an animated features grid, persona preview cards, and a quick-install/manual-download toggle with a copy button for the install command. Animations respect the "reduce motion" system setting.
 
 ## Troubleshooting
 
@@ -573,5 +594,5 @@ It covers the pitch, the "why local" explanation, an animated features grid, per
 - Twin keeps one ingested document active at a time. Loading a new one with `/ingest` replaces the active document; older ones stay in `~/.twin/twin.duckdb` but are no longer part of the conversation until re-ingested.
 - Filing lookup only searches EDGAR's "recent" filings window, roughly the last year of a company's activity. A form type filed further back comes back as not found even if it exists.
 - Donut is fine-tuned on receipts. Extraction quality on other kinds of document photos is weaker.
-- `Twin.app` ships ad-hoc signed, not signed with a paid Developer ID or notarized — a deliberate call for a portfolio project without real public download volume, not a gap to fill later. On a Mac other than the one that built it, the first launch needs right-click → Open (or `xattr -cr`) instead of a plain double-click. See [docs/RELEASING.md](docs/RELEASING.md).
+- `Twin.app` ships ad-hoc signed, not signed with a paid Developer ID or notarized — a deliberate call for a portfolio project without real public download volume, not a gap to fill later. On a Mac other than the one that built it, the first launch needs clearing Gatekeeper's block — `scripts/install.sh` does this automatically, or see [Installing a release build](#installing-a-release-build) for the manual System Settings steps (or `xattr -cr`). See [docs/RELEASING.md](docs/RELEASING.md).
 - Licensed under MIT (see `LICENSE`). The bundled fonts are under the SIL Open Font License.
