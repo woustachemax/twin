@@ -231,22 +231,93 @@ kbd {
   border-bottom: 1px solid #ffffff0d;
 }
 
-.bubble {
-  position: absolute;
-  top: 18%;
-  left: 8%;
-  right: 12%;
-  background: var(--text);
-  color: #17141f;
-  padding: 16px 18px;
-  border-radius: 20px 20px 20px 6px;
-  font-size: 16px;
-  line-height: 1.4;
-  box-shadow: 0 12px 30px #00000066;
-  animation: pop 0.6s cubic-bezier(.2, 1.6, .4, 1) both 0.4s;
+.mb-right { display: flex; align-items: center; gap: 8px; }
+
+.mb-icon {
+  position: relative;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--lime);
+  animation: heroMbPress 16s ease-in-out infinite;
 }
 
-.bubble .typing { color: #8a8398; font-family: var(--mono); font-size: 12px; display: block; margin-top: 8px; }
+.mb-icon-ring {
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  border: 1.5px solid var(--lime);
+  opacity: 0;
+  animation: heroMbRing 16s ease-out infinite;
+}
+
+.chat-cycle {
+  position: absolute;
+  top: 15%;
+  left: 8%;
+  right: 10%;
+  height: 60%;
+}
+
+.msg { position: absolute; top: 0; left: 0; right: 0; opacity: 0; }
+
+.msg-q { display: flex; justify-content: flex-end; }
+
+.bubble-q {
+  display: inline-block;
+  max-width: 100%;
+  background: #c6ff4a1f;
+  border: 1px solid #c6ff4a4d;
+  color: var(--lime);
+  font-family: var(--mono);
+  font-size: 13px;
+  padding: 8px 14px;
+  border-radius: 14px 14px 4px 14px;
+}
+
+.type-text {
+  display: inline-block;
+  overflow: hidden;
+  white-space: nowrap;
+  vertical-align: bottom;
+  width: 0;
+  border-right: 2px solid var(--lime);
+}
+
+.qa .type-text { animation: heroTypeA 16s steps(14, end) infinite; }
+.qb .type-text { animation: heroTypeB 16s steps(24, end) infinite; }
+
+.qa { animation: heroFadeQA 16s ease infinite; }
+.qb { animation: heroFadeQB 16s ease infinite; }
+
+.msg-a {
+  top: 50px;
+  background: var(--text);
+  color: #17141f;
+  padding: 13px 16px;
+  border-radius: 18px 18px 18px 6px;
+  font-size: 15px;
+  line-height: 1.4;
+  box-shadow: 0 12px 30px #00000066;
+}
+
+.aa { animation: heroPopAA 16s ease infinite; }
+.ab { animation: heroPopAB 16s ease infinite; }
+
+.tool-chip {
+  position: absolute;
+  top: 48px;
+  left: 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--sky);
+  background: #7ad7ff1a;
+  border: 1px dashed #7ad7ff55;
+  padding: 5px 10px;
+  border-radius: 999px;
+  opacity: 0;
+  animation: heroFadeChip 16s ease infinite;
+}
 
 .blob {
   position: absolute;
@@ -308,20 +379,6 @@ kbd {
 .sparkle.s2 { right: 30%; bottom: 14%; font-size: 14px; color: var(--sky); animation-delay: 0.8s; }
 .sparkle.s3 { left: 48%; bottom: 40%; font-size: 12px; color: var(--pink); animation-delay: 1.4s; }
 
-.sticker {
-  position: absolute;
-  bottom: 18px;
-  right: 16px;
-  font-family: var(--mono);
-  font-size: 11px;
-  background: var(--pink);
-  color: #111;
-  padding: 5px 10px;
-  border-radius: 8px;
-  transform: rotate(4deg);
-  font-weight: 600;
-}
-
 @keyframes bob {
   0%, 100% { transform: translateY(0) rotate(-2deg); }
   50% { transform: translateY(-8px) rotate(1.5deg); }
@@ -332,14 +389,73 @@ kbd {
   95% { transform: scaleY(0.1); }
 }
 
-@keyframes pop {
-  from { opacity: 0; transform: scale(0.6) translateY(20px); }
-  to { opacity: 1; transform: none; }
-}
-
 @keyframes twinkle {
   0%, 100% { opacity: 0.2; transform: scale(0.8); }
   50% { opacity: 1; transform: scale(1.15) rotate(20deg); }
+}
+
+@keyframes heroMbPress {
+  0%, 0.5%, 50%, 100% { transform: scale(1); }
+  1.5% { transform: scale(0.7); }
+  3% { transform: scale(1); }
+  51% { transform: scale(0.7); }
+  52.5% { transform: scale(1); }
+}
+
+@keyframes heroMbRing {
+  0%, 0.5% { opacity: 0; transform: scale(0.6); }
+  1.5% { opacity: 0.8; transform: scale(1); }
+  6%, 50%, 50.5% { opacity: 0; transform: scale(0.6); }
+  51.5% { opacity: 0.8; transform: scale(1); }
+  56% { opacity: 0; transform: scale(1.6); }
+}
+
+@keyframes heroFadeQA {
+  0%, 100% { opacity: 0; }
+  1% { opacity: 1; }
+  44% { opacity: 1; }
+  47% { opacity: 0; }
+}
+
+@keyframes heroTypeA {
+  0%, 1% { width: 0; border-color: var(--lime); }
+  15% { width: 14ch; border-color: var(--lime); }
+  16% { border-color: transparent; }
+  44% { width: 14ch; }
+  47%, 100% { width: 0; border-color: transparent; }
+}
+
+@keyframes heroPopAA {
+  0%, 20%, 100% { opacity: 0; transform: scale(0.7) translateY(10px); }
+  25%, 44% { opacity: 1; transform: scale(1) translateY(0); }
+  47% { opacity: 0; transform: scale(0.9) translateY(6px); }
+}
+
+@keyframes heroFadeQB {
+  0%, 52%, 100% { opacity: 0; }
+  53% { opacity: 1; }
+  92% { opacity: 1; }
+  96% { opacity: 0; }
+}
+
+@keyframes heroTypeB {
+  0%, 52% { width: 0; border-color: var(--lime); }
+  70% { width: 24ch; border-color: var(--lime); }
+  71% { border-color: transparent; }
+  92% { width: 24ch; }
+  96%, 100% { width: 0; border-color: transparent; }
+}
+
+@keyframes heroFadeChip {
+  0%, 68%, 100% { opacity: 0; }
+  70%, 78% { opacity: 1; }
+  81% { opacity: 0; }
+}
+
+@keyframes heroPopAB {
+  0%, 76%, 100% { opacity: 0; transform: scale(0.7) translateY(10px); }
+  80%, 92% { opacity: 1; transform: scale(1) translateY(0); }
+  96% { opacity: 0; transform: scale(0.9) translateY(6px); }
 }
 
 section { padding: 80px 0; }
@@ -949,13 +1065,17 @@ footer .made {
 
 @media (max-width: 520px) {
   .stage { aspect-ratio: 4 / 5; }
-  .bubble { top: 16%; font-size: 15px; }
+  .chat-cycle { top: 14%; }
+  .msg-a, .msg-q .bubble-q { font-size: 14px; }
   .persona-grid { grid-template-columns: 1fr; }
   .persona.p-twin { grid-column: auto; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
+  .qa, .aa { opacity: 1 !important; }
+  .qa .type-text { opacity: 1 !important; width: 14ch !important; border-color: transparent !important; }
+  .qb, .ab, .tool-chip { opacity: 0 !important; }
 }
 </style>
 </head>
@@ -975,7 +1095,7 @@ footer .made {
 
   <header class="hero">
     <div>
-      <span class="badge">✨ v0.1.0 · now a real Mac app</span>
+      <span class="badge">✨ v0.1.0 · you don't need python anymore</span>
       <h1>a tiny buddy that lives on your <span class="squiggle">Mac.</span></h1>
       <p class="tagline">Twin floats on your desktop, knows roughly what you've been up to, and <b>keeps all of it on your machine.</b></p>
       <div class="cta-row">
@@ -986,11 +1106,20 @@ footer .made {
     </div>
 
     <div class="stage" aria-hidden="true">
-      <div class="menubar"><span> Finder  File  Edit</span><span>🔋 11:42</span></div>
-      <div class="bubble">
-        hey! you've been ordering a lot of takeout this week. rough deadline? want me to help you plan something easier for tonight?
-        <span class="typing">twin is being nosy (locally)</span>
+      <div class="menubar">
+        <span> Finder  File  Edit</span>
+        <span class="mb-right"><span class="mb-icon"><span class="mb-icon-ring"></span></span>🔋 11:42</span>
       </div>
+
+      <div class="chat-cycle">
+        <div class="msg msg-q qa"><span class="bubble-q"><span class="type-text">morning brief?</span></span></div>
+        <div class="msg msg-a aa">standup at 10, dentist at 2. mom texted twice.</div>
+
+        <div class="msg msg-q qb"><span class="bubble-q"><span class="type-text">check aapl's latest 10-k</span></span></div>
+        <div class="tool-chip">📄 reading SEC EDGAR…</div>
+        <div class="msg msg-a ab">services revenue hit $96b, up 12% yoy.</div>
+      </div>
+
       <div class="blob">
         <span class="eye l"></span><span class="eye r"></span>
         <span class="cheek l"></span><span class="cheek r"></span>
@@ -999,7 +1128,6 @@ footer .made {
       <span class="sparkle s1">✦</span>
       <span class="sparkle s2">✦</span>
       <span class="sparkle s3">✦</span>
-      <span class="sticker">100% local brain</span>
     </div>
   </header>
 </div>

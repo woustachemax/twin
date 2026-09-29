@@ -60,12 +60,41 @@ This started as a hackathon project. It's about 3,500 lines of Python and meant 
 
 7. **Voice.** Hold Cmd+Shift+V, or hold the small dot next to the input field, and say something. Twin records while you hold it, turns it into text on-device with Apple's Speech framework, and runs it through the same `submit()` flow as anything you type, so it gets the same scrubbing and the same answer. Replies are read back with macOS's built-in `say`, in a voice and rate that vary a little by persona, unless you turn that off with `/voice off`. The first time you use it, Twin explains what's about to happen before macOS asks for Microphone and Speech Recognition access. If either is denied, Twin says so in the bubble instead of failing silently, and never sends audio or transcribed text anywhere except the same redacted request that already goes to your provider for typed messages.
 
+Filing lookup and document ingestion follow a separate path:
+
+```
+ SEC EDGAR (data.sec.gov)                 your files (PDF, JPG, PNG)
+            |                                        |
+            v                                        v
+   research_search.py                       document_ingest.py
+            |                                        |
+  filing excerpt, unscrubbed               pypdfium2 (PDF text layer)
+  (public disclosure)                      or Donut OCR (scanned pages, photos)
+            |                                        |
+            |                     packages/db/db.py -> ~/.twin/twin.duckdb
+            |                                        |
+            |                     excerpt, redacted, one document active at a time
+            v                                        v
+                              buddy.py
+                                  |
+                          scrubbed request only
+                                  v
+           the provider you picked (Anthropic, OpenAI, Google Gemini, or xAI)
+```
+
+8. **Filing lookup.** Ask something like "Tesla's last 10-K" or "summarize Apple's most recent 8-K" and `research_search.py` resolves the company name or ticker, fetches the filing from EDGAR, and selects an excerpt from the section the question needs. The excerpt is a public company disclosure, so `scrub_system()` passes it through unscrubbed. Every request needs a contact string, set through `SEC_EDGAR_CONTACT` or `/setup edgar`. Without one, Twin asks for a contact instead of looking anything up.
+
+9. **Document ingestion.** `/ingest <path>` reads a PDF or a JPG/PNG photo with `document_ingest.py`, stores the full extracted text in the `documents` table in `~/.twin/twin.duckdb`, and keeps a truncated excerpt active for chat until `/forget` or the next `/ingest` replaces it. A document is your own data, so `redact.py`'s categories run on it before anything reaches your provider. The currency, account number, and generic number patterns built for bank SMS text are skipped for this excerpt specifically, so a receipt's total or a document's date reaches your provider as a real value.
+
 ## Repository layout
 
 ```
 digital-twin/
 ├── buddy.py                    desktop app: setup window, widget, personas, hotkey, prompt building, request scrubbing
+├── document_ingest.py          PDF and receipt-photo extraction: pypdfium2 for PDF text, Donut OCR for images and scanned pages
 ├── llm_providers.py            provider clients, key validation, Keychain storage
+├── redact.py                   regex-based PII redaction: email, phone, government-ID-shaped numbers, credit cards, addresses
+├── research_search.py          SEC EDGAR filing lookup: company resolution, filing fetch, excerpt selection
 ├── run_pipeline.py             ingest: Messages -> parser -> twin.duckdb
 ├── setup.py                    py2app build script for Twin.app
 ├── packages/
@@ -93,7 +122,7 @@ Your data lives outside the repo, in `~/.twin/`:
 
 ```
 ~/.twin/
-├── twin.duckdb                 your transactions and access log (created during setup)
+├── twin.duckdb                 your transactions, ingested documents, and access log (created during setup)
 ├── config.json                 your name, persona, provider, and setup state
 └── buddy.log                   log output when running as Twin.app
 ```
@@ -105,6 +134,8 @@ Your API key is not in either folder. It's stored in your macOS Keychain.
 - **macOS.** Twin reads the Messages database, reads your calendars through EventKit, and uses AppKit for the translucent window. It won't work on Linux or Windows.
 - **Python 3 with Tk.** Developed on Python 3.12 with Tk 9. The python.org installer includes Tk. With Homebrew, also run `brew install python-tk`.
 - **An API key** from one of the [supported providers](#ai-providers). You paste it into the setup window on first run.
+- **Internet access for the Donut model, once.** The first time you run `/ingest` on an image or a scanned PDF page, Twin downloads an 800 MB checkpoint from Hugging Face to `~/.cache/huggingface`. Every call after that loads from the local cache.
+- **A contact for SEC EDGAR, only for filing lookup.** Set `SEC_EDGAR_CONTACT`, or Twin asks for one the first time you look up a filing and saves it to `config["edgar_contact"]`.
 
 Python packages:
 
@@ -120,7 +151,10 @@ Python packages:
 | `pyobjc-framework-Vision` | `screen_reader.py` | on-device text recognition for screen questions |
 | `streamlit`, `pandas` | `packages/ui/app.py` | data monitor (optional) |
 | `py2app` | `setup.py` | building Twin.app (optional) |
-| `Pillow` | `assets/icon/make_icon.py` | regenerating the icon (optional) |
+| `pypdfium2` | `document_ingest.py` | reads a PDF's embedded text layer and rasterizes scanned pages for OCR (optional, only for `/ingest`) |
+| `transformers`, `torch` | `document_ingest.py` | loads and runs the Donut OCR model, CPU only, no GPU required (optional, only for `/ingest`) |
+| `sentencepiece`, `protobuf` | `document_ingest.py` | tokenizer support for the Donut model (optional, only for `/ingest`) |
+| `Pillow` | `document_ingest.py`, `assets/icon/make_icon.py` | opens receipt photos for OCR, regenerates the icon (optional unless you use `/ingest`) |
 
 ## Installation
 
@@ -189,6 +223,10 @@ Closing the window before finishing quits Twin, and it starts from step 1 next t
 | Change provider or key | `/setup` |
 | Catch up on today's Messages | "what did I miss?", "catch me up" |
 | Ask about your screen | "what am I looking at?", "what's on my screen?" |
+| Look up an SEC filing | "Tesla's last 10-K", "summarize Apple's most recent 8-K" |
+| Read a document | `/ingest <path>`, for example `/ingest ~/Downloads/receipt.jpg` |
+| Stop referencing that document | `/forget` |
+| Check what would be redacted before sending | `/redact-test <text>` |
 | Talk instead of typing | hold Cmd+Shift+V, or hold the dot by the input field |
 | Turn spoken replies on or off | `/voice on`, `/voice off` |
 
@@ -253,9 +291,10 @@ To add your own persona, add an entry to the `PERSONAS` dict with `name`, `tagli
 | `PERSONA` | saved choice, then `twin` | Persona key to start with. |
 | `TWIN_MODEL` | provider default | Model to use for the chosen provider. |
 | `TWIN_DB_PATH` | `~/.twin/twin.duckdb` | Database used by the pipeline, `buddy.py`, and the monitor. |
-| `TWIN_CONFIG_PATH` | `~/.twin/config.json` | Where your name, persona, provider, and setup state are saved. |
+| `TWIN_CONFIG_PATH` | `~/.twin/config.json` | Where your name, persona, provider, and setup state are saved. `research_search.py` also reads this path for a saved SEC EDGAR contact. |
 | `TWIN_OCR_SHORTCUT` | `Twin Extract Text` | Shortcut used for text recognition if the Vision package isn't installed. |
 | `TWIN_NUDGE_MINUTES` | `15` (or `nudge_minutes` in `config.json`) | How often Twin checks Messages against upcoming events. `0` turns nudges off. |
+| `SEC_EDGAR_CONTACT` | none, falls back to `config["edgar_contact"]` | Contact string sent in the `User-Agent` header on every SEC EDGAR request. Required before filing lookup works; set here, through onboarding, or with `/setup edgar`. |
 | `BUDDY_DEBUG` | off | Set to `1` to print every outgoing API request to stderr. See [Privacy](#privacy). |
 
 Constants near the top of `buddy.py` cover the rest: `MAX_TOKENS`, `HOTKEY`, widget size, and how often the calendar is refreshed (every 5 minutes, or 30 seconds after an error).
@@ -278,11 +317,12 @@ Twin keeps working without any of them. It says in the widget which feature is o
 
 ### What stays on your Mac
 
-- `~/.twin/twin.duckdb`, which holds the parsed transactions and the full raw SMS text.
-- `~/.twin/config.json`, which holds your name, persona, and provider.
+- `~/.twin/twin.duckdb`, which holds the parsed transactions, the full raw SMS text, and the full text of anything loaded with `/ingest`.
+- `~/.twin/config.json`, which holds your name, persona, provider, and your SEC EDGAR contact if you set one.
 - Your API key, in the macOS Keychain.
 - The temporary copy of the Messages database, which is deleted right after reading.
 - Screenshots, which are read on-device and deleted right away.
+- The Donut OCR model, downloaded once to `~/.cache/huggingface` and reused after that.
 
 There are no accounts, no sync, no analytics, and no Twin server. Everyone who installs Twin gets their own `twin.duckdb`, created in their own home folder during setup. It lives outside the repo, so it never ends up in git. Nothing is shared or pooled between users.
 
@@ -296,21 +336,30 @@ Each chat message makes one request to the provider you picked, containing:
 - the titles and times of today's calendar events
 - a vague summary of up to five recent transactions, such as `- received a payment yesterday`
 - when you ask about your screen, one sentence describing it, such as "They're in Mail, looking at what seems to be an email inbox."
+- when you look up a filing, an excerpt from the filing itself, up to 16,000 characters, unredacted
+- when a document is active, an excerpt of what `/ingest` extracted, up to 20,000 characters, redacted first
 
 Nudges are built and shown entirely on your Mac and are never sent anywhere. They contain the event title (scrubbed like any other) and one of four fixed phrases, never message text. Which nudges were shown is kept in `~/.twin/nudged.json` as hashes so the same one isn't repeated.
 
-It never includes amounts, balances, account numbers, reference numbers, merchant names, UPI handles, raw SMS text, screenshots, or text read from your screen.
+Outside of a filing excerpt or a document excerpt, no request includes amounts, balances, account numbers, reference numbers, merchant names, UPI handles, raw SMS text, screenshots, or text read from your screen.
+
+`buddy.py` treats a filing excerpt and a document excerpt differently once `build_request()` adds them to the system prompt. A filing excerpt is a public company disclosure filed with the SEC, so `buddy.py` marks it for `FILING_LINE_RE` and `scrub_system()` passes it through unchanged. A document excerpt is your own data, so `buddy.py` marks it for `DOCUMENT_LINE_RE` instead, and `scrub_system()` runs `redact.py`'s categories on it in full: email addresses, phone numbers, government-ID-shaped numbers, credit card numbers, and street addresses each come back as a label like `[email]` or `[card]`. `scrub_system()` skips the currency, account number, and generic number patterns for a document excerpt specifically, the same patterns that turn a transaction amount into `[amount]` elsewhere in the request, so a receipt's total or a document's date reaches your provider as a real value rather than a placeholder.
 
 Two other requests go to the provider: the small test request that checks your key during setup, and short requests that rephrase Twin's status messages in the persona's voice. Neither contains your data.
+
+### What SEC EDGAR requests contain
+
+Looking up a filing sends requests to SEC's own servers at sec.gov and data.sec.gov, not to your AI provider: one to resolve a company name or ticker to a CIK number, one to read the company's recent filings, and one to fetch the filing document itself. Each request carries a `User-Agent` header built from a contact string, since SEC's fair-access policy requires one. `research_search.py` reads that contact from `SEC_EDGAR_CONTACT` in the environment, or from `config["edgar_contact"]` if you set one through the onboarding prompt or `/setup edgar`. It has no hardcoded fallback contact. Until one is set, filing lookup fails and Twin asks for a contact email instead of guessing one.
 
 ### How that's enforced
 
 `buddy.py` doesn't rely on the prompt alone. It checks each request in several layers:
 
 1. **Allowlisted vocabulary.** Each line of the transaction summary must exactly match a fixed list of phrases (an activity like "spent money on groceries" plus a time phrase like "earlier this week"). Any line that doesn't match is dropped.
-2. **Scrubbing.** Before sending, the system prompt and every message are scrubbed. Sentences that look like bank SMS are replaced with `[removed: SMS text]`. Currency amounts, account numbers, email or UPI handles, long IDs, and numbers are replaced with `[amount]`, `[account]`, `[id]`, and `[number]`. Calendar titles are cut to 80 characters and scrubbed too.
-3. **Field allowlist.** Only the system prompt, the messages, and a token limit are passed to the provider client. Anything else is dropped.
-4. **Local screen summary.** The screen sentence is built on your Mac from the app name and a guess at the kind of content. The recognized text never leaves `screen_reader.py`.
+2. **Targeted PII detection.** `redact.py` runs on every message and on every system prompt line that isn't a filing excerpt, ahead of the pattern matching in the next layer. It matches email addresses, phone numbers, government-ID-shaped numbers (US Social Security numbers, Indian Aadhaar numbers), credit card numbers checked with a Luhn checksum, and street addresses, and replaces each with a label such as `[email]` or `[card]`.
+3. **Scrubbing.** Before sending, the system prompt and every message are scrubbed. Sentences that look like bank SMS are replaced with `[removed: SMS text]`. Currency amounts, account numbers, email or UPI handles, long IDs, and numbers are replaced with `[amount]`, `[account]`, `[id]`, and `[number]`. Calendar titles are cut to 80 characters and scrubbed too. A document excerpt skips only the currency, account number, and number patterns in this layer; the PII detection in the layer above still runs on it.
+4. **Field allowlist.** Only the system prompt, the messages, and a token limit are passed to the provider client. Anything else is dropped.
+5. **Local screen summary.** The screen sentence is built on your Mac from the app name and a guess at the kind of content. The recognized text never leaves `screen_reader.py`.
 
 To see exactly what leaves your machine, run:
 
@@ -334,7 +383,7 @@ While the dashboard is open, the startup refresh may find the database busy. Twi
 
 ## Database schema
 
-`~/.twin/twin.duckdb` has two tables, created by `packages/db/db.py` if they don't exist yet.
+`~/.twin/twin.duckdb` has three tables, created by `packages/db/db.py` if they don't exist yet.
 
 **`transactions`**
 
@@ -348,14 +397,27 @@ While the dashboard is open, the startup refresh may find the database busy. Twi
 | `ref_number` | VARCHAR | bank reference, may be null |
 | `raw_text` | VARCHAR | full SMS text, also used to skip duplicates |
 
+**`documents`**
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | VARCHAR | UUID, primary key |
+| `ingested_at` | TIMESTAMP | UTC, when `/ingest` ran |
+| `filename` | VARCHAR | original file name only, not the full path |
+| `doc_type` | VARCHAR | `pdf` or `image` |
+| `extraction_method` | VARCHAR | `pdf_text`, `donut`, or `pdf_text+donut` for a PDF with both kinds of page |
+| `content` | VARCHAR | full extracted text |
+| `content_hash` | VARCHAR | SHA-256 of `content`, used to skip duplicates |
+| `char_count` | INTEGER | length of `content` |
+
 **`access_log`**
 
 | Column | Type | Notes |
 |---|---|---|
 | `id` | VARCHAR | UUID, primary key |
 | `timestamp` | TIMESTAMP | UTC |
-| `source` | VARCHAR | for example `imessage_pipeline` |
-| `action` | VARCHAR | for example `insert_transaction` |
+| `source` | VARCHAR | for example `imessage_pipeline` or `document_ingest` |
+| `action` | VARCHAR | for example `insert_transaction` or `insert_document` |
 | `data_touched` | VARCHAR | human-readable summary of what was written |
 
 To look at it yourself:
@@ -372,9 +434,39 @@ The desktop app. On first run it shows the setup window described in [First run]
 
 Two helper processes run alongside it, both started by relaunching the same program with a flag: `--hotkey-listener` watches for the global hotkey, and `--request-calendar` asks macOS for calendar access. Keeping them out of the widget's process means neither can freeze or crash the window. Calendar events and API calls run in background threads.
 
+### `document_ingest.py`
+
+Extracts text from a PDF or a JPG/PNG photo so Twin can answer questions about it. `ingest_document()` reads a PDF's embedded text layer directly with `pypdfium2` when a page has one, and treats a page with fewer than 20 characters of extractable text as scanned: it renders that page to an image and reads it with Donut, a vision-to-sequence model. A JPG or PNG goes straight to Donut. The checkpoint is `naver-clova-ix/donut-base-finetuned-cord-v2`, an 800 MB model fine-tuned on receipts and licensed under MIT. It runs on CPU, with no GPU required, at a cost of a few seconds per image, and downloads once on first use to `~/.cache/huggingface`. Because the checkpoint targets receipts specifically, extraction quality on other kinds of document photos is weaker. `ingest_document()` returns the full extracted text for storage and a copy truncated to 20,000 characters for the prompt. `format_document_context()` marks each line for `buddy.py`'s `scrub_system()`, which runs `redact.py`'s categories on it in full but skips the currency, account number, and generic number patterns, so a receipt's total or a document's date reaches the model as a real value.
+
+Load a file and ask about it in the widget:
+
+```
+/ingest ~/Downloads/receipt.jpg
+```
+
 ### `llm_providers.py`
 
 One client per provider behind a common `complete()` method. Anthropic uses the official SDK. OpenAI and xAI use the Responses API, and Gemini uses its OpenAI-compatible Chat Completions endpoint, all over plain HTTPS. It also checks keys, maps provider errors (bad key, rate limit, offline, server error) to plain messages, and stores keys in the Keychain.
+
+### `redact.py`
+
+Redacts personal information from text before `buddy.py` includes it in a request to any provider. It matches five categories: email addresses; phone numbers, in a compact 10-digit form and a looser grouped form that covers formats like the UK's or India's; government-ID-shaped numbers, US Social Security numbers and Indian Aadhaar numbers; credit card numbers, a 13 to 19 digit candidate that must pass a Luhn checksum before it counts as a match; and street addresses, a number followed by words and a recognized suffix such as "St" or "Avenue". `redact()` returns the redacted text along with a list of what it found, which makes it usable as a dry run with no request sent anywhere. `buddy.py`'s `scrub()` calls it on every message and every system prompt line before its own currency, account number, and generic number patterns run.
+
+Check what a piece of text would trigger, without sending it anywhere:
+
+```
+/redact-test call me at 555-123-4567 or email jane@example.com
+```
+
+### `research_search.py`
+
+Looks up SEC filings by company name or ticker and returns excerpt text pulled directly from the filing document. `parse_filing_query()` matches phrasings like "what changed in Apple's last 10-K" or "summarize Tesla's most recent 8-K" against two patterns, company name before the form type and form type before the company name, and recognizes 10-K, 10-K/A, 10-Q, 8-K, DEF 14A, S-1, and spelled-out aliases such as "annual report". `resolve_company()` matches the name or ticker against SEC's `company_tickers.json` and keeps it cached in memory after the first request. `latest_filing()` reads the company's submissions from EDGAR and returns the most recent filing of the requested type. It only searches EDGAR's "recent" filings window, so a form type the company has not filed in roughly the last year comes back as not found even if an older one exists. `fetch_filing_excerpt()` downloads the filing document, strips its HTML, and jumps to the section that a "what changed" or "summarize" question usually needs, the Management's Discussion and Analysis section for a 10-K or 10-Q. It finds that section by matching the last occurrence of the item header in the document rather than the first, since the first occurrence is usually the filing's own table of contents. Every request carries the contact set through `SEC_EDGAR_CONTACT` or `/setup edgar`, and stays under 10 requests per second.
+
+Ask Twin directly, for example:
+
+```
+Tesla's last 10-K
+```
 
 ### `run_pipeline.py`
 
@@ -456,5 +548,8 @@ It covers the pitch, the "why local" explanation, an animated features grid, per
 - Twin only looks at the five most recent transactions when chatting.
 - Each chat message is answered on its own. Twin doesn't remember earlier turns of the conversation.
 - Answers about your screen are vague on purpose, since only a one-sentence summary is sent.
+- Twin keeps one ingested document active at a time. Loading a new one with `/ingest` replaces the active document; older ones stay in `~/.twin/twin.duckdb` but are no longer part of the conversation until re-ingested.
+- Filing lookup only searches EDGAR's "recent" filings window, roughly the last year of a company's activity. A form type filed further back comes back as not found even if it exists.
+- Donut is fine-tuned on receipts. Extraction quality on other kinds of document photos is weaker.
 - `Twin.app` isn't notarized, so it's meant for the Mac that built it.
 - No license file yet. Until one is added, default copyright applies. The bundled fonts are under the SIL Open Font License.
