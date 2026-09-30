@@ -1,6 +1,3 @@
-/* Shared across landing/index.html and landing/docs/index.html:
-   design tokens, nav, footer. Keep these two pages from drifting apart. */
-
 :root {
   --bg: #0e0d12;
   --bg-2: #16141d;

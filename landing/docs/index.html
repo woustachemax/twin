@@ -420,25 +420,25 @@ pip install anthropic duckdb python-dotenv pynput pyobjc-framework-Cocoa pyobjc-
 python3 buddy.py</pre>
         <button type="button" class="copy-btn" data-copy-target="cmd-source">copy</button>
       </div>
-      <p>That's the core install. You'll need Python 3 with Tk (the python.org installer includes it, or <code>brew install python-tk</code>). Add <code>pip install pypdfium2 torch transformers sentencepiece protobuf Pillow</code> if you also want <code>/ingest</code> — it pulls in <code>torch</code>, so it's a much bigger download, and it's why the downloadable app leaves it out entirely.</p>
+      <p>That's the core install. You'll need Python 3 with Tk (the python.org installer includes it, or <code>brew install python-tk</code>). Add <code>pip install pypdfium2 torch transformers sentencepiece protobuf Pillow</code> if you also want <code>/ingest</code>. It pulls in <code>torch</code>, so it's a much bigger download, and it's why the downloadable app leaves it out entirely.</p>
     </section>
 
     <section id="first-run">
       <h2>first run</h2>
       <p>The first time Twin starts, or any time <code>~/.twin/config.json</code> is missing or setup wasn't finished, it opens a setup window before the chat widget. Four steps and a summary:</p>
       <ol class="doc-steps">
-        <li><strong>Provider.</strong> Pick Anthropic, OpenAI, Google Gemini, or xAI, and paste your API key. Twin checks it with one small test request, then saves it to your macOS Keychain. Wrong key, out of credits, or the wrong provider — it says so and lets you try again.</li>
+        <li><strong>Provider.</strong> Pick Anthropic, OpenAI, Google Gemini, or xAI, and paste your API key. Twin checks it with one small test request, then saves it to your macOS Keychain. Wrong key, out of credits, or the wrong provider: it says so and lets you try again.</li>
         <li><strong>Name.</strong> What Twin should call you. Filled in with the first name from your Mac account.</li>
         <li><strong>Buddy.</strong> Pick one of the five <a href="#personas">personas</a>. Twin is selected by default.</li>
-        <li><strong>Permissions.</strong> Buttons for Calendar, the hotkey, and Messages. macOS only prompts when you click one — this page can be skipped.</li>
+        <li><strong>Permissions.</strong> Buttons for Calendar, the hotkey, and Messages. macOS only prompts when you click one. This page can be skipped.</li>
         <li><strong>Done.</strong> A summary of your choices. Twin creates your database at <code>~/.twin/twin.duckdb</code> here.</li>
       </ol>
-      <p>Your API key is not saved in a file — it goes straight into the macOS Keychain. Close the setup window before finishing and Twin quits; it picks up at step 1 next time, with your provider and key filled back in.</p>
+      <p>Your API key is not saved in a file. It goes straight into the macOS Keychain. Close the setup window before finishing and Twin quits; it picks up at step 1 next time, with your provider and key filled back in.</p>
     </section>
 
     <section id="permissions">
       <h2>permissions</h2>
-      <p>Grant these from the setup window's permissions page, or later in System Settings. macOS applies a permission change on relaunch, not immediately — quit and reopen Twin after granting one for it to take effect.</p>
+      <p>Grant these from the setup window's permissions page, or later in System Settings. macOS applies a permission change on relaunch, not immediately. Quit and reopen Twin after granting one for it to take effect.</p>
       <div class="table-wrap">
         <table>
           <thead>
@@ -541,10 +541,10 @@ python3 buddy.py</pre>
       <h2>your data</h2>
       <p>Everything Twin keeps lives in <code>~/.twin/</code>, outside the repo:</p>
       <ul>
-        <li><code>~/.twin/twin.duckdb</code> — parsed transactions, the full raw SMS text, and anything loaded with <code>/ingest</code>.</li>
-        <li><code>~/.twin/config.json</code> — your name, persona, provider, and setup state.</li>
+        <li><code>~/.twin/twin.duckdb</code>: parsed transactions, the full raw SMS text, and anything loaded with <code>/ingest</code>.</li>
+        <li><code>~/.twin/config.json</code>: your name, persona, provider, and setup state.</li>
       </ul>
-      <p>Your API key sits separately, in the macOS Keychain. There are no accounts, no sync, no analytics, and no Twin server — everyone who installs Twin gets their own database, created in their own home folder.</p>
+      <p>Your API key sits separately, in the macOS Keychain. There are no accounts, no sync, no analytics, and no Twin server. Everyone who installs Twin gets their own database, created in their own home folder.</p>
       <p>Every insert into <code>twin.duckdb</code> also writes a row to its <code>access_log</code> table, recording what was read, when, and by which part of Twin.</p>
 
       <h3>reset to a clean state</h3>
@@ -579,7 +579,7 @@ python3 buddy.py</pre>
         </details>
         <details class="faq-item">
           <summary>why doesn't /ingest work in the downloaded app?</summary>
-          <p>Its dependencies — Pillow, pypdfium2, torch, transformers, sentencepiece, and protobuf — aren't bundled into the <code>.dmg</code>. Together they'd take the app from about 150 MB to nearly 1 GB for a feature most people won't use. Run Twin from source (see <a href="#install">Install</a>) to get <code>/ingest</code>; everything else works the same either way.</p>
+          <p>Its dependencies (Pillow, pypdfium2, torch, transformers, sentencepiece, and protobuf) aren't bundled into the <code>.dmg</code>. Together they'd take the app from about 150 MB to nearly 1 GB for a feature most people won't use. Run Twin from source (see <a href="#install">Install</a>) to get <code>/ingest</code>; everything else works the same either way.</p>
         </details>
         <details class="faq-item">
           <summary>why does an SEC lookup ask for a contact first?</summary>
@@ -619,12 +619,12 @@ python3 buddy.py</pre>
         <li>The SMS parser targets Indian bank and UPI message formats. Other formats are ignored until someone adds patterns for them.</li>
         <li>The pipeline reads only the 200 most recent messages per run.</li>
         <li>Twin only looks at the five most recent transactions when chatting.</li>
-        <li>Each chat message is answered on its own — Twin doesn't remember earlier turns.</li>
+        <li>Each chat message is answered on its own. Twin doesn't remember earlier turns.</li>
         <li>Answers about your screen are vague on purpose, since only a one-sentence summary is sent.</li>
         <li>One ingested document is active at a time. Loading a new one with <code>/ingest</code> replaces it; older ones stay stored but out of the conversation until re-ingested.</li>
         <li>Filing lookup only searches EDGAR's "recent" filings window, roughly the last year. An older filing of that type comes back as not found even if it exists.</li>
         <li>Donut is fine-tuned on receipts, so extraction quality on other kinds of document photos is weaker.</li>
-        <li><code>Twin.app</code> ships ad-hoc signed, not signed with a paid Developer ID or notarized — a deliberate call for a portfolio project, not a gap to fill later.</li>
+        <li><code>Twin.app</code> ships ad-hoc signed, not signed with a paid Developer ID or notarized. That's a deliberate call for a portfolio project, not a gap to fill later.</li>
       </ul>
 
       <p class="still-stuck">Still stuck? <a href="https://github.com/woustachemax/twin/issues">Open an issue on GitHub</a>.</p>
