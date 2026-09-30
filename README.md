@@ -2,6 +2,8 @@
 
 A small, local-first AI buddy that lives on your Mac.
 
+[![Twin demo](https://twin.siddharththakkar.xyz/demo/poster.png)](https://twin.siddharththakkar.xyz/demo/demo.mp4)
+
 Twin floats on your desktop in a small widget, shows and hides with a global hotkey (`Cmd+Shift+Space`), and chats with you in one of five personas. It builds a rough picture of your day from your own Mac, reading bank SMS that arrive through Messages and events from your calendars, and keeps that data in a DuckDB file on your machine. Twin has no server of its own. When you chat, one request goes directly to the AI provider you picked (Anthropic, OpenAI, Google Gemini, or xAI), and that request is scrubbed before it leaves.
 
 This started as a hackathon project. It's about 3,500 lines of Python and meant for anyone to install and change.

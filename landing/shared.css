@@ -1,0 +1,115 @@
+/* Shared across landing/index.html and landing/docs/index.html:
+   design tokens, nav, footer. Keep these two pages from drifting apart. */
+
+:root {
+  --bg: #0e0d12;
+  --bg-2: #16141d;
+  --card: #1c1a25;
+  --line: #2c2938;
+  --text: #f3eefc;
+  --muted: #a39db3;
+  --lime: #c6ff4a;
+  --pink: #ff7ab8;
+  --sky: #7ad7ff;
+  --sun: #ffd35c;
+  --radius: 22px;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --sans: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+}
+
+.wrap { max-width: 1060px; margin: 0 auto; padding: 0 20px; }
+
+nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 22px 0;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 800;
+  font-size: 22px;
+  text-decoration: none;
+  letter-spacing: -0.02em;
+}
+
+.logo-dot {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--lime);
+  position: relative;
+  box-shadow: 0 0 0 3px #c6ff4a14;
+}
+
+.logo-dot::before, .logo-dot::after {
+  content: "";
+  position: absolute;
+  top: 9px;
+  width: 4px;
+  height: 7px;
+  border-radius: 3px;
+  background: var(--bg);
+  animation: blink 4.5s infinite;
+}
+
+.logo-dot::before { left: 7px; }
+.logo-dot::after { right: 7px; }
+
+@keyframes blink {
+  0%, 92%, 100% { transform: scaleY(1); }
+  95% { transform: scaleY(0.1); }
+}
+
+.nav-links { display: flex; gap: 22px; align-items: center; font-size: 15px; }
+.nav-links a { text-decoration: none; color: var(--muted); transition: color 0.15s ease; }
+.nav-links a:not(.gh-btn):hover { color: var(--lime); }
+
+.gh-btn {
+  border: 1.5px dashed var(--line);
+  padding: 7px 14px;
+  border-radius: 999px;
+  color: var(--text) !important;
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+.gh-btn { transition: transform 0.15s ease, border-color 0.15s ease; display: inline-block; }
+.gh-btn:hover { border-color: var(--lime); transform: translateY(-2px) scale(1.04); }
+
+footer {
+  padding: 50px 0 70px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+footer .footer-links {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 14px;
+}
+
+footer .footer-links a { text-decoration: none; color: var(--muted); transition: color 0.15s ease; }
+footer .footer-links a:hover { color: var(--lime); }
+
+footer .made a { color: var(--lime); text-decoration: none; border-bottom: 1.5px dashed var(--lime); }
+footer .made a:hover { color: var(--pink); border-color: var(--pink); }
+
+footer .made {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 13px;
+  border: 1px dashed var(--line);
+  padding: 8px 14px;
+  border-radius: 999px;
+  transform: rotate(-1deg);
+}
+
+@media (max-width: 820px) {
+  .nav-links a:not(.gh-btn) { display: none; }
+}

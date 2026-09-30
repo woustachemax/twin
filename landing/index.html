@@ -9,23 +9,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="shared.css">
 <style>
-:root {
-  --bg: #0e0d12;
-  --bg-2: #16141d;
-  --card: #1c1a25;
-  --line: #2c2938;
-  --text: #f3eefc;
-  --muted: #a39db3;
-  --lime: #c6ff4a;
-  --pink: #ff7ab8;
-  --sky: #7ad7ff;
-  --sun: #ffd35c;
-  --radius: 22px;
-  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-  --sans: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
-}
-
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 * { scrollbar-width: none; -ms-overflow-style: none; }
@@ -46,64 +31,6 @@ body {
 }
 
 a { color: inherit; }
-
-.wrap { max-width: 1060px; margin: 0 auto; padding: 0 20px; }
-
-nav {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 22px 0;
-}
-
-.logo {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-weight: 800;
-  font-size: 22px;
-  text-decoration: none;
-  letter-spacing: -0.02em;
-}
-
-.logo-dot {
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  background: var(--lime);
-  position: relative;
-  box-shadow: 0 0 0 3px #c6ff4a14;
-}
-
-.logo-dot::before, .logo-dot::after {
-  content: "";
-  position: absolute;
-  top: 9px;
-  width: 4px;
-  height: 7px;
-  border-radius: 3px;
-  background: var(--bg);
-  animation: blink 4.5s infinite;
-}
-
-.logo-dot::before { left: 7px; }
-.logo-dot::after { right: 7px; }
-
-.nav-links { display: flex; gap: 22px; align-items: center; font-size: 15px; }
-.nav-links a { text-decoration: none; color: var(--muted); transition: color 0.15s ease; }
-.nav-links a:not(.gh-btn):hover { color: var(--lime); }
-
-.gh-btn {
-  border: 1.5px dashed var(--line);
-  padding: 7px 14px;
-  border-radius: 999px;
-  color: var(--text) !important;
-  font-family: var(--mono);
-  font-size: 13px;
-}
-
-.gh-btn { transition: transform 0.15s ease, border-color 0.15s ease; display: inline-block; }
-.gh-btn:hover { border-color: var(--lime); transform: translateY(-2px) scale(1.04); }
 
 .hero {
   display: grid;
@@ -896,26 +823,6 @@ h2 {
 .need { margin-top: 22px; color: var(--muted); font-size: 16px; }
 .need b { color: var(--text); font-weight: 600; }
 
-footer {
-  padding: 50px 0 70px;
-  text-align: center;
-  color: var(--muted);
-  font-size: 15px;
-}
-
-footer .made a { color: var(--lime); text-decoration: none; border-bottom: 1.5px dashed var(--lime); }
-footer .made a:hover { color: var(--pink); border-color: var(--pink); }
-
-footer .made {
-  display: inline-block;
-  font-family: var(--mono);
-  font-size: 13px;
-  border: 1px dashed var(--line);
-  padding: 8px 14px;
-  border-radius: 999px;
-  transform: rotate(-1deg);
-}
-
 .persona-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -1191,6 +1098,7 @@ footer .made {
       <a href="#day">a day with twin</a>
       <a href="#features">more stuff</a>
       <a href="#personas">personas</a>
+      <a href="/docs">docs</a>
       <a href="#get">download</a>
       <a class="gh-btn" href="https://github.com/woustachemax/twin">★ github</a>
     </div>
@@ -1735,6 +1643,7 @@ footer .made {
 
 <footer>
   <div class="wrap">
+    <div class="footer-links"><a href="/docs">docs</a> · <a href="https://github.com/woustachemax/twin">github</a></div>
     <span class="made">made with &lt;3 by <a href="https://siddharththakkar.xyz" target="_blank" rel="noopener">woustachemax</a></span>
   </div>
 </footer>
