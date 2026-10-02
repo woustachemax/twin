@@ -56,7 +56,21 @@ PROVIDERS = {
         "base_url": "https://api.x.ai/v1",
         "extra": {},
     },
+    "ollama": {
+        "label": "Ollama",
+        "blurb": "Local models, fully offline",
+        "model": "llama3.2:1b",
+        "env": "",
+        "key_prefix": None,
+        "key_url": "https://ollama.com/library",
+        "api": "chat",
+        "base_url": "http://localhost:11434/v1",
+        "extra": {},
+        "local": True,
+    },
 }
+
+OLLAMA_TAGS_URL = "http://localhost:11434/api/tags"
 
 INVALID_KEY_MARKERS = (
     "api key not valid", "api_key_invalid", "invalid api key", "incorrect api key", "invalid x-api-key",
@@ -76,8 +90,9 @@ def display_url(url):
 
 
 def detect_provider(key):
-    for provider in sorted(PROVIDERS, key=lambda p: -len(PROVIDERS[p]["key_prefix"])):
-        if key.startswith(PROVIDERS[provider]["key_prefix"]):
+    for provider in sorted(PROVIDERS, key=lambda p: -len(PROVIDERS[p]["key_prefix"] or "")):
+        prefix = PROVIDERS[provider]["key_prefix"]
+        if prefix and key.startswith(prefix):
             return provider
     return None
 
@@ -97,6 +112,8 @@ def keychain_service(provider):
 
 
 def keychain_get(provider):
+    if PROVIDERS[provider].get("local"):
+        return None
     try:
         result = subprocess.run(
             ["security", "find-generic-password", "-a", KEYCHAIN_ACCOUNT, "-s", keychain_service(provider), "-w"],
@@ -109,6 +126,8 @@ def keychain_get(provider):
 
 
 def keychain_save(provider, key):
+    if PROVIDERS[provider].get("local"):
+        return True
     try:
         result = subprocess.run(
             ["security", "add-generic-password", "-U", "-a", KEYCHAIN_ACCOUNT, "-s", keychain_service(provider),
@@ -155,7 +174,19 @@ def http_failure_kind(status, text):
         return "auth"
     if status == 429:
         return "rate_limit"
+    if status == 404 and "model" in lowered:
+        return "model_not_found"
     return "api_error"
+
+
+def ollama_installed_models():
+    request = urllib.request.Request(OLLAMA_TAGS_URL, headers={"User-Agent": "Twin/0.1"})
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        return None
+    return [model.get("name", "") for model in data.get("models") or [] if model.get("name")]
 
 
 def post_json(url, api_key, body, timeout):
@@ -250,9 +281,16 @@ def make_client(provider, api_key, model=None):
     return CLIENTS[PROVIDERS[provider]["api"]](provider, api_key, model or PROVIDERS[provider]["model"])
 
 
-def validation_message(provider, error):
+def validation_message(provider, error, model=None):
     spec = PROVIDERS[provider]
     label = spec["label"]
+    if spec.get("local"):
+        if error.kind == "offline":
+            return "Couldn't reach Ollama. Run `ollama serve` in a terminal, then try again."
+        if error.kind == "model_not_found":
+            return f"Ollama doesn't have \"{model}\" yet. Run `ollama pull {model}` in a terminal, then try again."
+        detail = f": {error.detail}" if error.detail else "."
+        return f"Ollama returned an error while checking that model{detail}"
     if error.kind == "auth":
         return f"{label} didn't accept that key. Check that you copied the whole key, then paste it again."
     if error.kind == "rate_limit":
@@ -270,7 +308,7 @@ def validate_key(provider, api_key, model=None):
         client.complete(VALIDATION_SYSTEM, [{"role": "user", "content": "ping"}], VALIDATION_MAX_TOKENS,
                         timeout=VALIDATION_TIMEOUT)
     except ProviderError as e:
-        return None, validation_message(provider, e)
+        return None, validation_message(provider, e, client.model)
     return client, None
 
 
@@ -278,6 +316,10 @@ def precheck_key(provider, api_key):
     if provider not in PROVIDERS:
         return "Pick an AI provider first."
     spec = PROVIDERS[provider]
+    if spec.get("local"):
+        if not api_key:
+            return "Type the name of a model you've pulled with Ollama, like llama3.2."
+        return None
     if not api_key:
         return f"Paste your {spec['label']} API key first. You can create one at {display_url(spec['key_url'])}."
     if any(c.isspace() for c in api_key):
@@ -295,5 +337,9 @@ def saved_client(config):
     provider = config.get("provider") or "anthropic"
     if provider not in PROVIDERS:
         return None
+    spec = PROVIDERS[provider]
+    if spec.get("local"):
+        model = model_for(provider, config)
+        return make_client(provider, model, model)
     key = saved_key(provider)
     return make_client(provider, key, model_for(provider, config)) if key else None

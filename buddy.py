@@ -2748,6 +2748,7 @@ class SetupScreen:
     BUTTON_Y = 644
     STEPS = ("provider", "name", "buddy", "permissions")
     STEP_LABELS = ("provider", "name", "buddy", "permissions")
+    CARD_ROWS = (len(PROVIDERS) + 1) // 2
 
     def __init__(self, root, config, on_done, cancellable=False, saved=None):
         self.root = root
@@ -2796,8 +2797,10 @@ class SetupScreen:
         window.protocol("WM_DELETE_WINDOW", self.close)
         window.bind("<Return>", lambda _e: self.next())
         window.bind("<Escape>", lambda _e: self.close() if self.cancellable else None)
-        height = 530 if self.cancellable else self.HEIGHT
+        height = (530 + max(0, self.CARD_ROWS - 2) * 72) if self.cancellable else self.HEIGHT
         self.height = height
+        self.base_height = height
+        self.extra_height = 0
         canvas = tk.Canvas(window, width=self.WIDTH, height=height, bg=c["bg"], highlightthickness=0, bd=0)
         canvas.pack()
         self.canvas = canvas
@@ -2829,23 +2832,27 @@ class SetupScreen:
 
         status_y = self.STATUS_Y if not self.cancellable else height - 104
         button_y = self.BUTTON_Y if not self.cancellable else height - 62
+        self.base_status_y = status_y
+        self.base_button_y = button_y
         self.status = canvas.create_text(30, status_y, text="", anchor="nw", width=self.WIDTH - 60,
-                                         font=(self.display, 13), fill=c["muted"])
+                                         font=(self.display, 13), fill=c["muted"], tags=("bottombar",))
         right = self.WIDTH - 30
-        self.shape("button", right - 150, button_y, right, button_y + 42, 21, c["lime"])
+        self.shape("button", right - 150, button_y, right, button_y + 42, 21, c["lime"], extra=("bottombar",))
         self.button_text = canvas.create_text(right - 75, button_y + 21, text="Continue",
-                                              font=(self.display, 15, "bold"), fill=c["face"], tags=("button",))
+                                              font=(self.display, 15, "bold"), fill=c["face"],
+                                              tags=("button", "bottombar"))
         canvas.tag_bind("button", "<Button-1>", lambda _e: self.next())
         canvas.tag_bind("button", "<Enter>", lambda _e: self.hover_button(True))
         canvas.tag_bind("button", "<Leave>", lambda _e: self.hover_button(False))
         self.back = canvas.create_text(30, button_y + 21, text="", anchor="w", font=(self.display, 13),
-                                       fill=c["muted"], tags=("back",))
+                                       fill=c["muted"], tags=("back", "bottombar"))
         canvas.tag_bind("back", "<Button-1>", lambda _e: self.go_back())
         canvas.tag_bind("back", "<Enter>", lambda _e: self.canvas.config(cursor="pointinghand"))
         canvas.tag_bind("back", "<Leave>", lambda _e: self.canvas.config(cursor=""))
 
         x = (window.winfo_screenwidth() - self.WIDTH) // 2
         y = max(30, (window.winfo_screenheight() - height) // 3)
+        self.window_x, self.window_y = x, y
         window.geometry(f"{self.WIDTH}x{height}+{x}+{y}")
         activate_app()
         window.lift()
@@ -2932,7 +2939,8 @@ class SetupScreen:
             self.canvas.tag_bind(tag, "<Button-1>", lambda _e, p=provider: self.select_provider(p))
             self.canvas.tag_bind(tag, "<Enter>", lambda _e, p=provider: self.hover_card("card", p, True))
             self.canvas.tag_bind(tag, "<Leave>", lambda _e, p=provider: self.hover_card("card", p, False))
-        key_top = top + 18 + 2 * 72 + 22
+        key_top = top + 18 + self.CARD_ROWS * 72 + 22
+        self.key_top = key_top
         self.key_heading = self.text(30, key_top, "API key", size=16, bold=True)
         self.key_entry = self.field(key_top + 18, secret=True)
         self.reveal = self.text(self.WIDTH - 46, key_top + 39, "show", size=10, color=c["muted"], anchor="e",
@@ -2947,8 +2955,10 @@ class SetupScreen:
             key = self.validated_key if self.provider == preset and self.validated_key else (
                 self.prefill_key if preset == self.prefill_provider else llm_providers.env_key(preset))
             if key:
+                self.key_entry.delete(0, "end")
                 self.key_entry.insert(0, key)
-                self.set_status("Your saved key is filled in. Press Continue to check it.")
+                noun = "model" if PROVIDERS[preset].get("local") else "key"
+                self.set_status(f"Your saved {noun} is filled in. Press Continue to check it.")
 
     def select_provider(self, provider):
         if self.checking or self.page != "provider":
@@ -2961,10 +2971,90 @@ class SetupScreen:
             self.canvas.itemconfigure(f"card_{key}_fill", fill=mix(c["card"], c["lime"], 0.10) if on else c["card"])
             self.canvas.itemconfigure(f"card_{key}_name", fill=c["lime"] if on else c["text"])
         spec = PROVIDERS[provider]
-        self.canvas.itemconfigure(self.key_heading, text=f"{spec['label']} API key")
-        self.canvas.itemconfigure(self.link, text=f"Get a key at {llm_providers.display_url(spec['key_url'])}",
-                                  fill=c["sky"])
+        self.clear_model_chips()
+        if spec.get("local"):
+            self.canvas.itemconfigure(self.key_heading, text="Model")
+            self.key_entry.configure(show="")
+            self.canvas.itemconfigure(self.reveal, state="hidden")
+            models = llm_providers.ollama_installed_models()
+            if models is None:
+                self.canvas.itemconfigure(self.link, text="Ollama isn't running. Start it, then pick a model.",
+                                          fill=c["muted"])
+                self.set_extra_height(0)
+            elif models:
+                self.canvas.itemconfigure(self.link, text="")
+                if not self.key_entry.get().strip():
+                    self.key_entry.insert(0, models[0])
+                chip_bottom = self.render_model_chips(self.key_top + 65, models)
+                self.set_extra_height(max(0, chip_bottom + 30 - self.base_status_y))
+            else:
+                self.canvas.itemconfigure(
+                    self.link, text=f"No models pulled yet. Browse models at {llm_providers.display_url(spec['key_url'])}",
+                    fill=c["sky"])
+                self.set_extra_height(0)
+        else:
+            self.canvas.itemconfigure(self.key_heading, text=f"{spec['label']} API key")
+            self.key_entry.configure(show="•")
+            self.canvas.itemconfigure(self.reveal, state="normal", text="show")
+            self.canvas.itemconfigure(self.link, text=f"Get a key at {llm_providers.display_url(spec['key_url'])}",
+                                      fill=c["sky"])
+            self.set_extra_height(0)
         if self.canvas.itemcget(self.status, "fill") == c["pink"]:
+            self.set_status("")
+        self.key_entry.focus_set()
+
+    def clear_model_chips(self):
+        self.canvas.delete("model_chip")
+
+    def measure(self, text, size=12, mono=False):
+        probe = self.text(0, 0, text, size=size, mono=mono, tags=())
+        width = self.canvas.bbox(probe)[2] - self.canvas.bbox(probe)[0]
+        self.canvas.delete(probe)
+        return width
+
+    def render_model_chips(self, y, models):
+        c = self.c
+        x = 30
+        max_x = self.WIDTH - 30
+        for index, name in enumerate(models[:4]):
+            tag = f"chip{index}"
+            x2 = x + self.measure(name, mono=True) + 24
+            if x2 > max_x and x > 30:
+                x, y = 30, y + 32
+                x2 = x + self.measure(name, mono=True) + 24
+            self.shape(tag, x, y, x2, y + 26, 13, c["bg2"], c["line"], extra=("page", "model_chip"))
+            self.text(x + 12, y + 13, name, size=12, mono=True, tags=("page", "model_chip", tag))
+            self.canvas.tag_bind(tag, "<Button-1>", lambda _e, m=name: self.pick_model(m))
+            self.canvas.tag_bind(tag, "<Enter>", lambda _e, t=tag: self.chip_hover(t, True))
+            self.canvas.tag_bind(tag, "<Leave>", lambda _e, t=tag: self.chip_hover(t, False))
+            x = x2 + 10
+        label = "Browse more"
+        if x + self.measure(label) > max_x and x > 30:
+            x, y = 30, y + 32
+        self.text(x, y + 13, label, size=12, color=c["sky"], tags=("page", "model_chip", "browse_more"))
+        self.canvas.tag_bind("browse_more", "<Button-1>", lambda _e: self.open_key_page())
+        self.canvas.tag_bind("browse_more", "<Enter>", lambda _e: self.canvas.config(cursor="pointinghand"))
+        self.canvas.tag_bind("browse_more", "<Leave>", lambda _e: self.canvas.config(cursor=""))
+        return y + 26
+
+    def set_extra_height(self, delta):
+        if delta == self.extra_height:
+            return
+        diff = delta - self.extra_height
+        self.extra_height = delta
+        new_height = self.base_height + delta
+        self.window.geometry(f"{self.WIDTH}x{new_height}+{self.window_x}+{self.window_y}")
+        self.canvas.configure(height=new_height)
+        self.canvas.move("bottombar", 0, diff)
+
+    def chip_hover(self, tag, on):
+        self.canvas.itemconfigure(f"{tag}_edge", fill=self.c["lime"] if on else self.c["line"])
+        self.canvas.config(cursor="pointinghand" if on else "")
+
+    def pick_model(self, name):
+        self.key_entry.delete(0, "end")
+        self.key_entry.insert(0, name)
+        if self.canvas.itemcget(self.status, "fill") == self.c["pink"]:
             self.set_status("")
         self.key_entry.focus_set()
 
@@ -3166,9 +3256,13 @@ class SetupScreen:
             self.show_page(self.pages[1])
             return
         provider = self.provider
-        model = llm_providers.model_for(provider, self.config)
+        local = PROVIDERS[provider].get("local")
+        model = key if local else llm_providers.model_for(provider, self.config)
         self.set_busy(True)
-        self.set_status(f"Checking your key with {PROVIDERS[provider]['label']}. This sends one small test request.")
+        if local:
+            self.set_status("Checking Ollama...")
+        else:
+            self.set_status(f"Checking your key with {PROVIDERS[provider]['label']}. This sends one small test request.")
         threading.Thread(
             target=lambda: self.results.put((provider, key, *llm_providers.validate_key(provider, key, model))),
             daemon=True,
@@ -3193,6 +3287,8 @@ class SetupScreen:
         self.validated_key = key
         self.notice = None if llm_providers.keychain_save(provider, key) else KEY_NOT_SAVED_NOTE
         self.config["provider"] = provider
+        if PROVIDERS[provider].get("local"):
+            self.config["model"] = key
         try:
             save_config(self.config)
         except OSError as e:
