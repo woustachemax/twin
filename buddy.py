@@ -29,6 +29,7 @@ sys.path.insert(0, BASE_DIR)
 import calendar_reader
 import db
 import digest
+import conversation_reader
 import imessage_export
 import llm_providers
 import nudges
@@ -114,6 +115,7 @@ Keep replies short and casual: a few sentences of plain text, no lists or markdo
             "auth": "hmm, {provider} didn't accept your API key. type /setup to paste a new one?",
             "rate_limit": "whoa, lots of messages at once. give me a sec and try again?",
             "offline": "I can't reach the internet right now. check your connection and try again?",
+            "not_installed": "I need Ollama installed to run locally. get it at ollama.com/download, then try again?",
             "api_error": "{provider}'s having a moment on their end. try again in a bit?",
             "broken": "oops, something broke on my side. try that again?",
         },
@@ -143,6 +145,7 @@ How you talk:
             "auth": "My {provider} key's been exorcised. Type /setup and give me a fresh one, would you?",
             "rate_limit": "Whoa, too much haunting at once. Give me a sec and try again.",
             "offline": "The spirit realm's offline… I mean, I can't reach the internet. Check your connection?",
+            "not_installed": "My local spirit form needs Ollama installed first. Get it at ollama.com/download, then try again.",
             "api_error": "Something spooked the servers on {provider}'s end. Try again in a bit.",
             "broken": "Oops, tripped over my own shadow. Try that again?",
         },
@@ -170,6 +173,7 @@ How you talk:
             "auth": "Hmm, {provider} didn't like that API key! Type /setup with a fresh one and we're back in business!",
             "rate_limit": "Whoa, we're going too fast! Give me a sec and try again!",
             "offline": "I can't reach the internet right now! Check your connection and let's go again!",
+            "not_installed": "I need Ollama installed to run here! Get it at ollama.com/download and we'll go again!",
             "api_error": "{provider}'s servers hit a snag! Try again in a bit and we'll get rolling!",
             "broken": "Oops, I fumbled that one! Give it another shot!",
         },
@@ -352,6 +356,38 @@ DIGEST_UNREADABLE_NOTE = (
     "Security → Full Disk Access, then ask again."
 )
 DIGEST_LIMIT = 500
+SUMMARY_WITH_RE = re.compile(
+    r"\bsummari[sz]e\s+(?:my\s+)?(?:messages|texts|conversation|chat|thread)\s+(?:with|from)\s+(?P<name>[^?!.]+)",
+    re.I,
+)
+SUMMARY_POSSESSIVE_RE = re.compile(
+    r"\bsummari[sz]e\s+(?P<name>[^?!.]+?)['’]s\s+(?:messages|texts|conversation|chat|thread)\b",
+    re.I,
+)
+SUMMARY_YES = {"yes", "y", "yeah", "yep", "sure", "ok", "okay", "enable"}
+SUMMARY_NO = {"no", "n", "nope", "not now"}
+SUMMARY_OPT_IN_LOCAL = (
+    "Twin can read your Messages to summarize conversations when you ask. This never saves message content to "
+    "disk. The conversation stays on this Mac, since you're using Ollama. Enable this? Reply yes or no."
+)
+SUMMARY_OPT_IN_REMOTE = (
+    "Twin can read your Messages to summarize conversations when you ask. This never saves message content to "
+    "disk. To write each summary, the conversation text is sent to {provider}. Enable this? Reply yes or no."
+)
+SUMMARY_DECLINED_NOTE = "Okay, I won't read your Messages for summaries. Ask again whenever you want."
+SUMMARY_SYSTEM = (
+    "You're summarizing the user's own Messages conversation with one contact, given below oldest first, with "
+    "\"Me\" for the user. Write a few plain sentences: what they talked about, anything decided, and anything "
+    "still open. Don't quote messages word for word, and never state exact amounts, account numbers, or "
+    "addresses. If the thread doesn't show something, say so instead of guessing."
+)
+CONTACT_NOTES = {
+    "not_found": "I couldn't find {name} in your Contacts. Try the name exactly as it appears there.",
+    "ambiguous": "More than one contact is called {name}. Use their full name.",
+    "no_contacts": "I can't read your Contacts yet. Give Twin Full Disk Access in System Settings, then ask again.",
+    "no_handles": "{name} has no phone number or email I can match to Messages.",
+    "no_messages": "I don't see any messages with {name} on this Mac.",
+}
 
 FLIGHT_NO_ORIGIN_NOTE = (
     'Where are you flying from? Try something like "flights from Mumbai to Goa next weekend."'
@@ -784,6 +820,23 @@ def build_digest():
         print(f"[buddy] digest couldn't read Messages: {e!r}", file=sys.stderr)
         return DIGEST_UNREADABLE_NOTE
     return digest.summarize(messages, is_bank=is_bank_sms)
+
+
+def contact_summary_name(text):
+    for pattern in (SUMMARY_WITH_RE, SUMMARY_POSSESSIVE_RE):
+        match = pattern.search(text)
+        if match:
+            name = " ".join(match.group("name").split())
+            if name and name.lower() not in ("me", "my", "myself"):
+                return name
+    return None
+
+
+def summary_opt_in_text(client):
+    if client is not None and PROVIDERS.get(client.provider, {}).get("local"):
+        return SUMMARY_OPT_IN_LOCAL
+    provider = client.label if client is not None else "your AI provider"
+    return SUMMARY_OPT_IN_REMOTE.format(provider=provider)
 
 
 def check_nudges(events, seen):
@@ -1272,6 +1325,7 @@ class Buddy:
         self.pending_notices = []
         self.noticed = set()
         self.active_document = None
+        self.pending_summary = None
         self.family, self.mono = pick_fonts()
         if fresh:
             try:
@@ -2182,6 +2236,30 @@ class Buddy:
         if self.onboarding:
             self.handle_onboarding(question)
             return "break"
+        if self.pending_summary:
+            name, self.pending_summary = self.pending_summary, None
+            answer = question.lower().strip(" .!")
+            if answer in SUMMARY_YES:
+                self.config["message_summaries"] = True
+                try:
+                    save_config(self.config)
+                except OSError as e:
+                    print(f"[buddy] couldn't save {CONFIG_PATH}: {e}", file=sys.stderr)
+                self.start_contact_summary(name)
+                return "break"
+            if answer in SUMMARY_NO:
+                self.say(SUMMARY_DECLINED_NOTE, typing=True)
+                return "break"
+        summary_name = contact_summary_name(question)
+        if summary_name:
+            if not self.client:
+                self.say(offline_line(self.persona, "no_key", self.client), typing=True)
+            elif self.config.get("message_summaries"):
+                self.start_contact_summary(summary_name)
+            else:
+                self.pending_summary = summary_name
+                self.say(summary_opt_in_text(self.client), typing=True)
+            return "break"
         if is_catch_up(question):
             self.busy = True
             self.say("…")
@@ -2214,6 +2292,39 @@ class Buddy:
         except Exception as e:
             print(f"[buddy] catch-up failed: {e!r}", file=sys.stderr)
             reply = offline_line(persona, "broken", self.client)
+        self.replies.put(("reply", reply, persona["done"]))
+
+    def start_contact_summary(self, name):
+        self.busy = True
+        self.say("…")
+        threading.Thread(target=self.summarize_contact, args=(self.persona, name), daemon=True).start()
+
+    def summarize_contact(self, persona, name):
+        try:
+            display, thread = conversation_reader.fetch_thread(name)
+        except conversation_reader.ContactError as e:
+            self.replies.put(("reply", CONTACT_NOTES[e.kind].format(name=name), persona["done"]))
+            return
+        except (PermissionError, sqlite3.Error, OSError) as e:
+            print(f"[buddy] summary couldn't read Messages: {e!r}", file=sys.stderr)
+            self.replies.put(("reply", DIGEST_UNREADABLE_NOTE, persona["done"]))
+            return
+        transcript = "\n".join(f"{m['sender']}: {scrub(m['text'], strict=True)[0]}" for m in thread)
+        request = {
+            "max_tokens": MAX_TOKENS,
+            "system": persona["system_prompt"] + "\n\n" + SUMMARY_SYSTEM,
+            "messages": [{"role": "user", "content": f"Conversation with {display}:\n{transcript}"}],
+        }
+        try:
+            text, refused = send_to_api(self.client, request)
+        except ProviderError as e:
+            log_failure(e)
+            reply = offline_line(persona, e.kind, self.client)
+        else:
+            if refused:
+                reply = voice_line(self.client, persona, REFUSAL_NOTE)
+            else:
+                reply = text or voice_line(self.client, persona, EMPTY_NOTE)
         self.replies.put(("reply", reply, persona["done"]))
 
     def look_at_screen(self, question):
@@ -2978,9 +3089,10 @@ class SetupScreen:
             self.canvas.itemconfigure(self.reveal, state="hidden")
             models = llm_providers.ollama_installed_models()
             if models is None:
-                self.canvas.itemconfigure(self.link, text="Ollama isn't running. Start it, then pick a model.",
-                                          fill=c["muted"])
+                self.canvas.itemconfigure(self.link, text="", fill=c["muted"])
                 self.set_extra_height(0)
+                self.set_status("Starting Ollama...")
+                self.start_ollama_then_list(provider)
             elif models:
                 self.canvas.itemconfigure(self.link, text="")
                 if not self.key_entry.get().strip():
@@ -3005,6 +3117,29 @@ class SetupScreen:
 
     def clear_model_chips(self):
         self.canvas.delete("model_chip")
+
+    def start_ollama_then_list(self, provider):
+        result = {}
+        thread = threading.Thread(target=lambda: result.update(ok=llm_providers.start_ollama()), daemon=True)
+        thread.start()
+
+        def finish():
+            if thread.is_alive():
+                self.window.after(150, finish)
+                return
+            if self.provider != provider or self.page != "provider":
+                return
+            if result.get("ok"):
+                self.set_status("")
+                self.select_provider(provider)
+            elif llm_providers.ollama_installed():
+                self.set_status("Ollama is installed but didn't start. Open Ollama, then pick it again.", "error")
+            else:
+                self.canvas.itemconfigure(self.link, text=f"Get Ollama at {llm_providers.display_url(llm_providers.OLLAMA_DOWNLOAD_URL)}",
+                                          fill=self.c["sky"])
+                self.set_status("Ollama isn't installed yet. Install it, then pick it again.", "error")
+
+        self.window.after(150, finish)
 
     def measure(self, text, size=12, mono=False):
         probe = self.text(0, 0, text, size=size, mono=mono, tags=())
@@ -3368,6 +3503,8 @@ def main():
             if not accessibility_trusted():
                 buddy.notify(ACCESSIBILITY_NOTE)
 
+        if current_config.get("provider") == "ollama":
+            threading.Thread(target=llm_providers.start_ollama, daemon=True).start()
         client = llm_providers.saved_client(current_config)
         if client is None or not current_config.get("onboarded"):
             SetupScreen(root, current_config, on_done=lambda c, n: start(c, n, fresh=True), saved=client)

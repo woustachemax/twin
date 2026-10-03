@@ -1,13 +1,19 @@
 import json
 import os
+import shutil
 import ssl
 import subprocess
+import time
 import urllib.error
 import urllib.request
 
 import anthropic
 
 KEYCHAIN_ACCOUNT = "twin"
+OLLAMA_APP = "/Applications/Ollama.app"
+OLLAMA_DOWNLOAD_URL = "https://ollama.com/download"
+OLLAMA_START_TIMEOUT = 8
+OLLAMA_START_POLL = 0.25
 VALIDATION_SYSTEM = "Reply with the single word OK."
 VALIDATION_MAX_TOKENS = 16
 VALIDATION_TIMEOUT = 30
@@ -189,6 +195,31 @@ def ollama_installed_models():
     return [model.get("name", "") for model in data.get("models") or [] if model.get("name")]
 
 
+def ollama_installed():
+    return os.path.isdir(OLLAMA_APP) or shutil.which("ollama") is not None
+
+
+def start_ollama():
+    if ollama_installed_models() is not None:
+        return True
+    if not ollama_installed():
+        return False
+    try:
+        if os.path.isdir(OLLAMA_APP):
+            subprocess.run(["open", "-a", "Ollama"], check=False, timeout=10)
+        else:
+            subprocess.Popen(["ollama", "serve"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, start_new_session=True)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    deadline = time.monotonic() + OLLAMA_START_TIMEOUT
+    while time.monotonic() < deadline:
+        if ollama_installed_models() is not None:
+            return True
+        time.sleep(OLLAMA_START_POLL)
+    return ollama_installed_models() is not None
+
+
 def post_json(url, api_key, body, timeout):
     request = urllib.request.Request(
         url,
@@ -264,7 +295,15 @@ class ChatClient(BaseClient):
         spec = PROVIDERS[self.provider]
         chat = ([{"role": "system", "content": system}] if system else []) + messages
         body = {"model": self.model, "messages": chat, "max_tokens": max_tokens, **spec["extra"]}
-        data = post_json(f"{spec['base_url']}/chat/completions", self.api_key, body, timeout)
+        url = f"{spec['base_url']}/chat/completions"
+        try:
+            data = post_json(url, self.api_key, body, timeout)
+        except ProviderError as e:
+            if e.kind != "offline" or not spec.get("local"):
+                raise
+            if not start_ollama():
+                raise ProviderError("not_installed" if not ollama_installed() else "offline", e.detail)
+            data = post_json(url, self.api_key, body, timeout)
         choice = (data.get("choices") or [{}])[0]
         message = choice.get("message") or {}
         content = message.get("content") or ""
@@ -285,8 +324,10 @@ def validation_message(provider, error, model=None):
     spec = PROVIDERS[provider]
     label = spec["label"]
     if spec.get("local"):
+        if error.kind == "not_installed":
+            return f"Ollama isn't installed yet. Download it at {display_url(OLLAMA_DOWNLOAD_URL)}, then try again."
         if error.kind == "offline":
-            return "Couldn't reach Ollama. Run `ollama serve` in a terminal, then try again."
+            return "Ollama is installed but didn't start. Open Ollama, then try again."
         if error.kind == "model_not_found":
             return f"Ollama doesn't have \"{model}\" yet. Run `ollama pull {model}` in a terminal, then try again."
         detail = f": {error.detail}" if error.detail else "."
