@@ -117,6 +117,8 @@ Keep replies short and casual: a few sentences of plain text, no lists or markdo
             "offline": "I can't reach the internet right now. check your connection and try again?",
             "not_installed": "I need Ollama installed to run locally. get it at ollama.com/download, then try again?",
             "api_error": "{provider}'s having a moment on their end. try again in a bit?",
+            "model_not_found": "hmm, I don't have {model} installed yet. run ollama pull {model} in a terminal, or type /setup to pick another one?",
+            "offline_local": "I can't reach Ollama right now. make sure it's running on this Mac, then try again?",
             "broken": "oops, something broke on my side. try that again?",
         },
     },
@@ -147,6 +149,8 @@ How you talk:
             "offline": "The spirit realm's offline… I mean, I can't reach the internet. Check your connection?",
             "not_installed": "My local spirit form needs Ollama installed first. Get it at ollama.com/download, then try again.",
             "api_error": "Something spooked the servers on {provider}'s end. Try again in a bit.",
+            "model_not_found": "That model isn't haunting this machine yet. Run ollama pull {model}, or pick another one in /setup, then try again.",
+            "offline_local": "My local spirit form isn't answering. Make sure Ollama is running on this Mac, then try again.",
             "broken": "Oops, tripped over my own shadow. Try that again?",
         },
     },
@@ -175,6 +179,8 @@ How you talk:
             "offline": "I can't reach the internet right now! Check your connection and let's go again!",
             "not_installed": "I need Ollama installed to run here! Get it at ollama.com/download and we'll go again!",
             "api_error": "{provider}'s servers hit a snag! Try again in a bit and we'll get rolling!",
+            "model_not_found": "I don't have {model} pulled yet! Run ollama pull {model} or pick another one in /setup, and we'll go again!",
+            "offline_local": "I can't reach Ollama right now! Make sure it's running on this Mac and we'll go again!",
             "broken": "Oops, I fumbled that one! Give it another shot!",
         },
     },
@@ -203,6 +209,9 @@ How you talk:
             "rate_limit": "Lots of requests at once. Let's pause for a breath and try again in a moment.",
             "offline": "I can't reach the internet right now. Take your time, check the connection, and we'll try again.",
             "api_error": "{provider}'s servers are having a hard moment. Let's try again in a little while.",
+            "not_installed": "I need Ollama installed to run here. You can get it at ollama.com/download, and we'll pick up from there.",
+            "model_not_found": "{model} isn't installed in Ollama yet. You can pull it with ollama pull {model}, or pick another one in /setup whenever you like.",
+            "offline_local": "I can't reach Ollama right now. Could you make sure it's running on this Mac? We'll try again once it is.",
             "broken": "Something went a little wrong on my side. It's okay, let's try that again.",
         },
     },
@@ -224,6 +233,9 @@ How you talk:
             "rate_limit": "Rate limited. Try again in a moment.",
             "offline": "Couldn't reach the API. Check your connection.",
             "api_error": "{provider} returned an error. Try again shortly.",
+            "not_installed": "Ollama isn't installed. Get it at ollama.com/download.",
+            "model_not_found": "{model} isn't installed in Ollama yet. Run ollama pull {model}, or pick another model in /setup.",
+            "offline_local": "Couldn't reach Ollama. Make sure it's running on this Mac.",
             "broken": "Something went wrong. Try again.",
         },
     },
@@ -696,10 +708,24 @@ def debug_log(request, notes, client):
     print("\n".join(lines), file=sys.stderr, flush=True)
 
 
-def send_to_api(client, request, notes=()):
+def stream_to_api(client, clean, on_chunk):
+    parts = []
+    stream = client.complete_stream(clean["system"], clean["messages"], clean["max_tokens"])
+    while True:
+        try:
+            chunk = next(stream)
+        except StopIteration as done:
+            return "".join(parts).strip(), bool(done.value)
+        parts.append(chunk)
+        on_chunk(chunk)
+
+
+def send_to_api(client, request, notes=(), on_chunk=None):
     clean, found = sanitize_request(request)
     notes = list(notes) + found
     debug_log(clean, notes, client)
+    if on_chunk is not None and hasattr(client, "complete_stream"):
+        return stream_to_api(client, clean, on_chunk)
     return client.complete(clean["system"], clean["messages"], clean["max_tokens"])
 
 
@@ -709,7 +735,11 @@ def log_failure(error):
 
 def offline_line(persona, kind, client):
     provider = client.label if client is not None else "your AI provider"
-    return persona["offline"][kind].format(provider=provider)
+    local = client is not None and PROVIDERS[client.provider].get("local")
+    table = persona["offline"]
+    key = "offline_local" if local and kind == "offline" else kind
+    model = client.model if client is not None else ""
+    return table.get(key, table["broken"]).format(provider=provider, model=model)
 
 
 def voice_line(client, persona, message):
@@ -730,10 +760,10 @@ def voice_line(client, persona, message):
 
 
 def ask_model(client, persona, question, user_name=None, calendar_events=None, screen=None, flights=None, filings=None,
-              documents=None):
+              documents=None, on_chunk=None):
     request, notes = build_request(persona, question, user_name, calendar_events, screen, flights, filings, documents)
     try:
-        text, refused = send_to_api(client, request, notes)
+        text, refused = send_to_api(client, request, notes, on_chunk)
     except ProviderError as e:
         log_failure(e)
         return offline_line(persona, e.kind, client), False
@@ -1279,6 +1309,7 @@ class Buddy:
         self.status_until = 0.0
         self.typing_job = None
         self.pending_md_spans = []
+        self.streamed_text = None
         self.nswindow = None
         self.set_chrome = None
         self.previous_app = None
@@ -1977,6 +2008,17 @@ class Buddy:
             self.apply_md_spans()
             self.render_menu()
 
+    def show_stream(self, raw):
+        if self.typing_job is not None:
+            self.root.after_cancel(self.typing_job)
+            self.typing_job = None
+        message, self.pending_md_spans = strip_markdown_with_spans(raw.lstrip())
+        self.bubble.config(state="normal")
+        self.bubble.delete("1.0", "end")
+        self.bubble.insert("end", message)
+        self.bubble.config(state="disabled")
+        self.apply_md_spans()
+
     def apply_md_spans(self):
         spans, self.pending_md_spans = self.pending_md_spans, []
         if not spans:
@@ -2449,12 +2491,15 @@ class Buddy:
         else:
             self.say(self.voice(self.persona, EDGAR_CONTACT_SKIPPED_NOTE), typing=True)
 
+    def stream_chunk(self, text):
+        self.replies.put(("chunk", text, None))
+
     def answer(self, persona, question, user_name):
         error = None
         try:
             events, error = self.calendar.get()
             reply, ok = ask_model(self.client, persona, question, user_name, events,
-                                  documents=self.active_document_context())
+                                  documents=self.active_document_context(), on_chunk=self.stream_chunk)
             kind = "reply" if ok else "reply_error"
         except Exception as e:
             print(f"[buddy] answer failed: {e!r}", file=sys.stderr)
@@ -2483,6 +2528,9 @@ class Buddy:
                     self.show()
             elif kind == "raw_notice":
                 self.notify(message)
+            elif kind == "chunk":
+                self.streamed_text = (self.streamed_text or "") + message
+                self.show_stream(self.streamed_text)
             elif kind == "notice":
                 self.pending_notices.append((message, status))
             elif kind == "nudge":
@@ -2525,7 +2573,13 @@ class Buddy:
             else:
                 self.busy = False
                 menu, self.next_menu = self.next_menu, None
-                self.say(message, typing=True, menu=menu)
+                if self.streamed_text is not None and message == self.streamed_text.strip():
+                    self.show_stream(message)
+                    self.menu_after_typing = menu
+                    self.render_menu()
+                else:
+                    self.say(message, typing=True, menu=menu)
+                self.streamed_text = None
                 if kind in ("reply", "reply_error", "reply_screen") and self.voice_enabled:
                     voice.stop_speaking()
                     try:

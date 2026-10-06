@@ -1,3 +1,4 @@
+import http.client
 import json
 import os
 import shutil
@@ -220,23 +221,38 @@ def start_ollama():
     return ollama_installed_models() is not None
 
 
-def post_json(url, api_key, body, timeout):
-    request = urllib.request.Request(
+def json_request(url, api_key, body):
+    return urllib.request.Request(
         url,
         data=json.dumps(body).encode("utf-8"),
         method="POST",
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}", "User-Agent": "Twin/0.1"},
     )
-    try:
-        with urllib.request.urlopen(request, timeout=timeout, context=ssl_context()) as response:
-            return json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
+
+
+def provider_error(e):
+    if isinstance(e, urllib.error.HTTPError):
         text = e.read().decode("utf-8", "replace")
-        raise ProviderError(http_failure_kind(e.code, text), error_message(text) or f"HTTP {e.code}")
+        return ProviderError(http_failure_kind(e.code, text), error_message(text) or f"HTTP {e.code}")
+    return ProviderError("offline", str(getattr(e, "reason", e)))
+
+
+def post_json(url, api_key, body, timeout):
+    try:
+        with urllib.request.urlopen(json_request(url, api_key, body), timeout=timeout,
+                                    context=ssl_context()) as response:
+            return json.loads(response.read().decode("utf-8"))
     except (urllib.error.URLError, TimeoutError, OSError) as e:
-        raise ProviderError("offline", str(getattr(e, "reason", e)))
+        raise provider_error(e)
     except ValueError:
         raise ProviderError("api_error", "the response couldn't be read")
+
+
+def open_stream(url, api_key, body, timeout):
+    try:
+        return urllib.request.urlopen(json_request(url, api_key, body), timeout=timeout, context=ssl_context())
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        raise provider_error(e)
 
 
 class BaseClient:
@@ -312,8 +328,61 @@ class ChatClient(BaseClient):
         refused = bool(message.get("refusal")) or choice.get("finish_reason") == "content_filter"
         return content.strip(), refused
 
+    def complete_stream(self, system, messages, max_tokens, timeout=CHAT_TIMEOUT):
+        spec = PROVIDERS[self.provider]
+        chat = ([{"role": "system", "content": system}] if system else []) + messages
+        body = {"model": self.model, "messages": chat, "max_tokens": max_tokens, "stream": True, **spec["extra"]}
+        url = f"{spec['base_url']}/chat/completions"
+        try:
+            response = open_stream(url, self.api_key, body, timeout)
+        except ProviderError as e:
+            if e.kind != "offline" or not spec.get("local"):
+                raise
+            if not start_ollama():
+                raise ProviderError("not_installed" if not ollama_installed() else "offline", e.detail)
+            response = open_stream(url, self.api_key, body, timeout)
+        refused, finished = False, False
+        try:
+            with response:
+                for raw in response:
+                    line = raw.decode("utf-8", "replace").strip()
+                    if not line.startswith("data:"):
+                        continue
+                    payload = line[len("data:"):].strip()
+                    if payload == "[DONE]":
+                        finished = True
+                        break
+                    try:
+                        data = json.loads(payload)
+                    except ValueError:
+                        raise ProviderError("api_error", "the response couldn't be read")
+                    if not isinstance(data, dict):
+                        raise ProviderError("api_error", "the response couldn't be read")
+                    if data.get("error"):
+                        raise ProviderError("api_error", error_message(payload) or "the stream reported an error")
+                    choices = data.get("choices") or []
+                    if not choices:
+                        continue
+                    choice = choices[0] or {}
+                    delta = choice.get("delta") or {}
+                    content = delta.get("content")
+                    if isinstance(content, list):
+                        content = "".join(part.get("text", "") for part in content if isinstance(part, dict))
+                    if content:
+                        yield content
+                    if delta.get("refusal"):
+                        refused = True
+                    if choice.get("finish_reason"):
+                        finished = True
+                        refused = refused or choice["finish_reason"] == "content_filter"
+        except (urllib.error.URLError, http.client.HTTPException, OSError) as e:
+            raise provider_error(e)
+        if not finished:
+            raise ProviderError("offline", "the reply was cut off")
+        return refused
 
-CLIENTS = {"anthropic": AnthropicClient, "responses": ResponsesClient, "chat": ChatClient}
+
+CLIENTS ={"anthropic": AnthropicClient, "responses": ResponsesClient, "chat": ChatClient}
 
 
 def make_client(provider, api_key, model=None):
