@@ -331,6 +331,15 @@ EMPTY_NOTE = "I didn't come up with a reply that time. Try asking again?"
 SAVE_FAILED_NOTE = "I couldn't save your settings on this Mac, so I'll ask again next time I start."
 KEY_NOT_SAVED_NOTE = "I couldn't save your API key to your Keychain, so I'll ask for it again next time I start."
 PROVIDER_SWITCHED_NOTE = "All set, I'm using {provider} for my replies now."
+PULL_ERROR_LINES = {
+    "cancelled": "Download cancelled.",
+    "disk_full": "Not enough free disk space for that model.",
+    "no_internet": "Downloading a model needs an internet connection once. After that Twin runs fully offline.",
+    "not_installed": "Ollama isn't installed yet. Install it, then try again.",
+    "offline": "Couldn't reach Ollama. Make sure it's running, then try again.",
+    "model_not_found": "Couldn't find that model to pull. Check the name and try again.",
+    "api_error": "The download failed. Try again in a bit.",
+}
 ACCESSIBILITY_NOTE = (
     "the Cmd+Shift+Space hotkey needs Accessibility access. allow Twin in System Settings → Privacy & "
     "Security → Accessibility, then restart me."
@@ -2924,10 +2933,13 @@ class SetupScreen:
         self.c = LANDING
         self.display, self.mono = pick_fonts()
         self.provider = None
+        self.entry_by_provider = {}
         self.client = saved
         self.validated_key = None
         self.checking = False
         self.finishing = False
+        self.pulling = False
+        self.pull_cancel = None
         self.page = None
         self.widgets = []
         self.name = config.get("name") or default_first_name()
@@ -3125,10 +3137,16 @@ class SetupScreen:
                 noun = "model" if PROVIDERS[preset].get("local") else "key"
                 self.set_status(f"Your saved {noun} is filled in. Press Continue to check it.")
 
+    def set_entry_masking(self, local):
+        self.key_entry.configure(show="" if local else "•")
+        self.canvas.itemconfigure(self.reveal, state="hidden" if local else "normal", text="show")
+
     def select_provider(self, provider):
         if self.checking or self.page != "provider":
             return
         c = self.c
+        if self.provider is not None:
+            self.entry_by_provider[self.provider] = self.key_entry.get()
         self.provider = provider
         for key in PROVIDERS:
             on = key == provider
@@ -3136,11 +3154,19 @@ class SetupScreen:
             self.canvas.itemconfigure(f"card_{key}_fill", fill=mix(c["card"], c["lime"], 0.10) if on else c["card"])
             self.canvas.itemconfigure(f"card_{key}_name", fill=c["lime"] if on else c["text"])
         spec = PROVIDERS[provider]
+        local = spec.get("local")
         self.clear_model_chips()
-        if spec.get("local"):
+        self.set_entry_masking(local)
+        self.key_entry.delete(0, "end")
+        remembered = self.entry_by_provider.get(provider)
+        if remembered:
+            self.key_entry.insert(0, remembered)
+        elif not local:
+            env = llm_providers.env_key(provider)
+            if env:
+                self.key_entry.insert(0, env)
+        if local:
             self.canvas.itemconfigure(self.key_heading, text="Model")
-            self.key_entry.configure(show="")
-            self.canvas.itemconfigure(self.reveal, state="hidden")
             models = llm_providers.ollama_installed_models()
             if models is None:
                 self.canvas.itemconfigure(self.link, text="", fill=c["muted"])
@@ -3154,14 +3180,10 @@ class SetupScreen:
                 chip_bottom = self.render_model_chips(self.key_top + 65, models)
                 self.set_extra_height(max(0, chip_bottom + 30 - self.base_status_y))
             else:
-                self.canvas.itemconfigure(
-                    self.link, text=f"No models pulled yet. Browse models at {llm_providers.display_url(spec['key_url'])}",
-                    fill=c["sky"])
-                self.set_extra_height(0)
+                self.canvas.itemconfigure(self.link, text="")
+                self.render_download_prompt(self.key_top + 65, llm_providers.recommend_model())
         else:
             self.canvas.itemconfigure(self.key_heading, text=f"{spec['label']} API key")
-            self.key_entry.configure(show="•")
-            self.canvas.itemconfigure(self.reveal, state="normal", text="show")
             self.canvas.itemconfigure(self.link, text=f"Get a key at {llm_providers.display_url(spec['key_url'])}",
                                       fill=c["sky"])
             self.set_extra_height(0)
@@ -3246,6 +3268,98 @@ class SetupScreen:
         if self.canvas.itemcget(self.status, "fill") == self.c["pink"]:
             self.set_status("")
         self.key_entry.focus_set()
+
+    def render_download_prompt(self, y, name):
+        c = self.c
+        size = llm_providers.model_size_gb(name)
+        size_text = f" (about {size:.1f} GB)" if size else ""
+        self.text(30, y, f"No models yet. Recommended for this Mac: {name}{size_text}", size=12,
+                 color=c["muted"], width=self.WIDTH - 60, tags=("page", "model_chip"))
+        button_y = y + 24
+        button_width = self.measure("Download", size=13) + 28
+        self.shape("download_btn", 30, button_y, 30 + button_width, button_y + 34, 17, c["lime"],
+                  extra=("page", "model_chip"))
+        self.text(30 + button_width / 2, button_y + 17, "Download", size=13, bold=True, color=c["face"],
+                 anchor="center", tags=("page", "model_chip", "download_btn"))
+        self.canvas.tag_bind("download_btn", "<Button-1>", lambda _e, m=name: self.start_download(m))
+        self.canvas.tag_bind("download_btn", "<Enter>", lambda _e: self.canvas.config(cursor="pointinghand"))
+        self.canvas.tag_bind("download_btn", "<Leave>", lambda _e: self.canvas.config(cursor=""))
+        link_x = 30 + button_width + 16
+        self.text(link_x, button_y + 17, "or type a model name", size=11, color=c["sky"],
+                 tags=("page", "model_chip", "manual_model_link"))
+        self.canvas.tag_bind("manual_model_link", "<Button-1>", lambda _e: self.key_entry.focus_set())
+        self.canvas.tag_bind("manual_model_link", "<Enter>", lambda _e: self.canvas.config(cursor="pointinghand"))
+        self.canvas.tag_bind("manual_model_link", "<Leave>", lambda _e: self.canvas.config(cursor=""))
+        self.set_extra_height(max(0, button_y + 34 + 30 - self.base_status_y))
+
+    def render_pull_progress(self, y, name):
+        c = self.c
+        self.text(30, y, f"Downloading {name}...", size=13, bold=True, tags=("page", "model_chip"))
+        track_y = y + 26
+        self.shape("pull_track", 30, track_y, self.WIDTH - 30, track_y + 10, 5, c["bg2"], c["line"],
+                  extra=("page", "model_chip"))
+        self.pull_track_x1, self.pull_track_x2, self.pull_track_y = 31, self.WIDTH - 31, track_y
+        self.pull_bar = self.canvas.create_rectangle(31, track_y + 1, 31, track_y + 9, fill=c["lime"],
+                                                     outline="", tags=("page", "model_chip"))
+        self.pull_status = self.text(30, track_y + 22, "starting...", size=12, color=c["muted"],
+                                     tags=("page", "model_chip"))
+        cancel_y = track_y + 46
+        self.text(30, cancel_y, "Cancel", size=12, color=c["pink"], tags=("page", "model_chip", "cancel_pull"))
+        self.canvas.tag_bind("cancel_pull", "<Button-1>", lambda _e: self.cancel_download())
+        self.canvas.tag_bind("cancel_pull", "<Enter>", lambda _e: self.canvas.config(cursor="pointinghand"))
+        self.canvas.tag_bind("cancel_pull", "<Leave>", lambda _e: self.canvas.config(cursor=""))
+        self.set_extra_height(max(0, cancel_y + 26 - self.base_status_y))
+
+    def update_pull_progress(self, fraction, status):
+        if not self.pulling:
+            return
+        if fraction is not None:
+            width = self.pull_track_x2 - self.pull_track_x1
+            x2 = self.pull_track_x1 + width * fraction
+            self.canvas.coords(self.pull_bar, self.pull_track_x1, self.pull_track_y + 1, x2, self.pull_track_y + 9)
+        pct = f" {round(fraction * 100)}%" if fraction is not None else ""
+        self.canvas.itemconfigure(self.pull_status, text=f"{status}{pct}")
+
+    def start_download(self, name):
+        if self.checking or self.pulling:
+            return
+        self.pulling = True
+        self.pull_cancel = threading.Event()
+        self.clear_model_chips()
+        self.render_pull_progress(self.key_top + 65, name)
+        self.key_entry.configure(state="disabled")
+        threading.Thread(target=self.run_pull, args=(name,), daemon=True).start()
+
+    def run_pull(self, name):
+        def on_progress(fraction, status):
+            self.results.put(("pull_progress", fraction, status))
+        try:
+            llm_providers.pull_model(name, on_progress, cancel=self.pull_cancel)
+        except llm_providers.ProviderError as e:
+            self.results.put(("pull_error", e, name))
+        else:
+            self.results.put(("pull_done", name, None))
+
+    def finish_pull(self, name):
+        self.pulling = False
+        self.key_entry.configure(state="normal")
+        self.clear_model_chips()
+        self.set_extra_height(0)
+        self.pick_model(name)
+        self.set_status("Downloaded. Press Continue to finish setup.", "ok")
+
+    def handle_pull_error(self, error, name):
+        self.pulling = False
+        self.key_entry.configure(state="normal")
+        message = error.detail if error.kind == "disk_full" and error.detail else PULL_ERROR_LINES.get(
+            error.kind, PULL_ERROR_LINES["api_error"])
+        self.select_provider(self.provider)
+        self.set_status(message, "info" if error.kind == "cancelled" else "error")
+
+    def cancel_download(self):
+        if self.pulling and self.pull_cancel is not None:
+            self.pull_cancel.set()
+            self.canvas.itemconfigure(self.pull_status, text="cancelling...")
 
     def hover_card(self, kind, key, on):
         selected = self.provider if kind == "card" else self.persona
@@ -3402,7 +3516,7 @@ class SetupScreen:
         self.key_entry.configure(state="disabled" if busy else "normal")
 
     def go_back(self):
-        if self.checking or self.finishing:
+        if self.checking or self.finishing or self.pulling:
             return
         if self.cancellable and self.page == "provider":
             self.close()
@@ -3414,7 +3528,7 @@ class SetupScreen:
             self.show_page(self.pages[index - 1])
 
     def next(self):
-        if self.checking or self.finishing:
+        if self.checking or self.finishing or self.pulling:
             return
         if self.page == "provider":
             self.check_key()
@@ -3435,6 +3549,12 @@ class SetupScreen:
 
     def check_key(self):
         key = self.key_entry.get().strip()
+        local = self.provider in PROVIDERS and PROVIDERS[self.provider].get("local")
+        if local and llm_providers.detect_provider(key):
+            self.key_entry.delete(0, "end")
+            self.set_status("That looks like an API key, not a model name.", "error")
+            self.key_entry.focus_set()
+            return
         problem = llm_providers.precheck_key(self.provider, key)
         if problem:
             self.set_status(problem, "error")
@@ -3445,7 +3565,6 @@ class SetupScreen:
             self.show_page(self.pages[1])
             return
         provider = self.provider
-        local = PROVIDERS[provider].get("local")
         model = key if local else llm_providers.model_for(provider, self.config)
         self.set_busy(True)
         if local:
@@ -3461,10 +3580,23 @@ class SetupScreen:
         if not self.window.winfo_exists():
             return
         try:
-            provider, key, client, problem = self.results.get_nowait()
+            item = self.results.get_nowait()
         except queue.Empty:
             self.window.after(100, self.poll)
             return
+        if item[0] == "pull_progress":
+            self.update_pull_progress(item[1], item[2])
+            self.window.after(100, self.poll)
+            return
+        if item[0] == "pull_done":
+            self.finish_pull(item[1])
+            self.window.after(100, self.poll)
+            return
+        if item[0] == "pull_error":
+            self.handle_pull_error(item[1], item[2])
+            self.window.after(100, self.poll)
+            return
+        provider, key, client, problem = item
         self.set_busy(False)
         if client is None:
             self.set_status(problem, "error")
@@ -3509,6 +3641,8 @@ class SetupScreen:
         fade(1.0)
 
     def close(self):
+        if self.pulling and self.pull_cancel is not None:
+            self.pull_cancel.set()
         if self.cancellable:
             self.window.destroy()
         else:

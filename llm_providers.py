@@ -19,6 +19,14 @@ VALIDATION_SYSTEM = "Reply with the single word OK."
 VALIDATION_MAX_TOKENS = 16
 VALIDATION_TIMEOUT = 30
 CHAT_TIMEOUT = 90
+PULL_READ_TIMEOUT = 30
+DISK_MARGIN_GB = 2
+DEFAULT_RECOMMENDED_MODEL = "qwen2.5:3b"
+
+MODEL_RECOMMENDATIONS = {
+    "qwen2.5:3b": {"max_ram_gb": 12, "size_gb": 2.2},
+    "llama3.1:8b": {"max_ram_gb": None, "size_gb": 5.3},
+}
 
 PROVIDERS = {
     "anthropic": {
@@ -78,6 +86,13 @@ PROVIDERS = {
 }
 
 OLLAMA_TAGS_URL = "http://localhost:11434/api/tags"
+OLLAMA_PULL_URL = "http://localhost:11434/api/pull"
+
+NO_INTERNET_MARKERS = (
+    "no such host", "lookup", "dial tcp", "network is unreachable", "no route to host", "tls handshake",
+    "i/o timeout", "temporary failure in name resolution",
+)
+DISK_FULL_MARKERS = ("no space left", "disk quota exceeded", "not enough space")
 
 INVALID_KEY_MARKERS = (
     "api key not valid", "api_key_invalid", "invalid api key", "incorrect api key", "invalid x-api-key",
@@ -219,6 +234,99 @@ def start_ollama():
             return True
         time.sleep(OLLAMA_START_POLL)
     return ollama_installed_models() is not None
+
+
+def physical_ram_gb():
+    try:
+        result = subprocess.run(["sysctl", "-n", "hw.memsize"], capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    try:
+        return int(result.stdout.strip()) / (1024 ** 3)
+    except ValueError:
+        return None
+
+
+def recommend_model():
+    ram_gb = physical_ram_gb()
+    if ram_gb is None:
+        return DEFAULT_RECOMMENDED_MODEL
+    for name, info in MODEL_RECOMMENDATIONS.items():
+        if info["max_ram_gb"] is None or ram_gb < info["max_ram_gb"]:
+            return name
+    return DEFAULT_RECOMMENDED_MODEL
+
+
+def model_size_gb(name):
+    info = MODEL_RECOMMENDATIONS.get(name)
+    return info["size_gb"] if info else None
+
+
+def disk_space_error(name, path="/"):
+    size_gb = model_size_gb(name)
+    if size_gb is None:
+        return None
+    try:
+        free_gb = shutil.disk_usage(path).free / (1024 ** 3)
+    except OSError:
+        return None
+    if free_gb - size_gb < DISK_MARGIN_GB:
+        return ProviderError(
+            "disk_full",
+            f"{name} needs about {size_gb:.1f} GB and only {free_gb:.1f} GB is free",
+        )
+    return None
+
+
+def pull_error(text):
+    lowered = text.lower()
+    if any(marker in lowered for marker in DISK_FULL_MARKERS):
+        return ProviderError("disk_full", text.strip()[:200])
+    if any(marker in lowered for marker in NO_INTERNET_MARKERS):
+        return ProviderError("no_internet", text.strip()[:200])
+    if "not found" in lowered or "manifest" in lowered:
+        return ProviderError("model_not_found", text.strip()[:200])
+    return ProviderError("api_error", text.strip()[:200])
+
+
+def pull_model(name, on_progress, cancel=None, timeout=PULL_READ_TIMEOUT):
+    error = disk_space_error(name)
+    if error:
+        raise error
+    if ollama_installed_models() is None:
+        if not start_ollama():
+            raise ProviderError("not_installed" if not ollama_installed() else "offline", "Ollama didn't start")
+    request = json_request(OLLAMA_PULL_URL, "", {"model": name, "stream": True})
+    try:
+        response = urllib.request.urlopen(request, timeout=timeout, context=ssl_context())
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        raise provider_error(e)
+    finished = False
+    try:
+        with response:
+            for raw in response:
+                if cancel is not None and cancel.is_set():
+                    raise ProviderError("cancelled", "the download was cancelled")
+                line = raw.decode("utf-8", "replace").strip()
+                if not line:
+                    continue
+                try:
+                    data = json.loads(line)
+                except ValueError:
+                    continue
+                if data.get("error"):
+                    raise pull_error(str(data["error"]))
+                status = data.get("status", "")
+                total = data.get("total")
+                completed = data.get("completed")
+                fraction = completed / total if total and completed is not None else None
+                on_progress(fraction, status)
+                if status == "success":
+                    finished = True
+    except (urllib.error.URLError, http.client.HTTPException, OSError) as e:
+        raise provider_error(e)
+    if not finished:
+        raise ProviderError("offline", "the download stopped before it finished")
 
 
 def json_request(url, api_key, body):
