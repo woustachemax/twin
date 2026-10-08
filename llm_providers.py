@@ -12,6 +12,7 @@ import anthropic
 
 KEYCHAIN_ACCOUNT = "twin"
 OLLAMA_APP = "/Applications/Ollama.app"
+OLLAMA_FALLBACK_BINS = ("/usr/local/bin/ollama", "/opt/homebrew/bin/ollama")
 OLLAMA_DOWNLOAD_URL = "https://ollama.com/download"
 OLLAMA_START_TIMEOUT = 8
 OLLAMA_START_POLL = 0.25
@@ -211,8 +212,18 @@ def ollama_installed_models():
     return [model.get("name", "") for model in data.get("models") or [] if model.get("name")]
 
 
+def ollama_binary():
+    found = shutil.which("ollama")
+    if found:
+        return found
+    for path in OLLAMA_FALLBACK_BINS:
+        if os.path.isfile(path):
+            return path
+    return None
+
+
 def ollama_installed():
-    return os.path.isdir(OLLAMA_APP) or shutil.which("ollama") is not None
+    return os.path.isdir(OLLAMA_APP) or ollama_binary() is not None
 
 
 def start_ollama():
@@ -224,7 +235,7 @@ def start_ollama():
         if os.path.isdir(OLLAMA_APP):
             subprocess.run(["open", "-a", "Ollama"], check=False, timeout=10)
         else:
-            subprocess.Popen(["ollama", "serve"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            subprocess.Popen([ollama_binary(), "serve"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                              stderr=subprocess.DEVNULL, start_new_session=True)
     except (OSError, subprocess.TimeoutExpired):
         return False
