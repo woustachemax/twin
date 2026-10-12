@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>docs · Twin</title>
-<meta name="description" content="How to install Twin, what it asks permission for, every command and hotkey, and exactly what does and doesn't leave your Mac.">
+<meta name="description" content="How to install Twin, run it fully local with Ollama and no API key, what it asks permission for, every command and hotkey, and what does and doesn't leave your Mac.">
 <link id="favicon" rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cellipse cx='32' cy='33' rx='29' ry='27' fill='%23c6ff4a'/%3E%3Crect x='20' y='20' width='7' height='13' rx='3.5' fill='%23111'/%3E%3Crect x='37' y='20' width='7' height='13' rx='3.5' fill='%23111'/%3E%3Cellipse cx='15' cy='38' rx='5' ry='3' fill='%23ff7ab8'/%3E%3Cellipse cx='49' cy='38' rx='5' ry='3' fill='%23ff7ab8'/%3E%3Cpath d='M27 39 Q32 45 37 39' fill='none' stroke='%23111' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -375,6 +375,7 @@ td code { white-space: nowrap; }
     <div class="toc" id="toc-nav" role="navigation" aria-label="table of contents">
       <a href="#install">install</a>
       <a href="#first-run">first run</a>
+      <a href="#ollama">running locally with ollama</a>
       <a href="#permissions">permissions</a>
       <a href="#commands">commands &amp; hotkeys</a>
       <a href="#personas">personas</a>
@@ -427,13 +428,47 @@ python3 buddy.py</pre>
       <h2>first run</h2>
       <p>The first time Twin starts, or any time <code>~/.twin/config.json</code> is missing or setup wasn't finished, it opens a setup window before the chat widget. Four steps and a summary:</p>
       <ol class="doc-steps">
-        <li><strong>Provider.</strong> Pick Anthropic, OpenAI, Google Gemini, or xAI, and paste your API key. Twin checks it with one small test request, then saves it to your macOS Keychain. Wrong key, out of credits, or the wrong provider: it says so and lets you try again.</li>
+        <li><strong>Provider.</strong> Pick Anthropic, OpenAI, Google Gemini, xAI, or Ollama. For a cloud provider, paste your API key: Twin checks it with one small test request, then saves it to your macOS Keychain. Wrong key, out of credits, or the wrong provider: it says so and lets you try again. For Ollama, there's no key: see <a href="#ollama">running locally with Ollama</a> for what happens instead.</li>
         <li><strong>Name.</strong> What Twin should call you. Filled in with the first name from your Mac account.</li>
         <li><strong>Buddy.</strong> Pick one of the five <a href="#personas">personas</a>. Twin is selected by default.</li>
         <li><strong>Permissions.</strong> Buttons for Calendar, the hotkey, and Messages. macOS only prompts when you click one. This page can be skipped.</li>
         <li><strong>Done.</strong> A summary of your choices. Twin creates your database at <code>~/.twin/twin.duckdb</code> here.</li>
       </ol>
       <p>Your API key is not saved in a file. It goes straight into the macOS Keychain. Close the setup window before finishing and Twin quits; it picks up at step 1 next time, with your provider and key filled back in.</p>
+    </section>
+
+    <section id="ollama">
+      <h2>running locally with ollama</h2>
+      <p>Ollama is a fifth provider choice, and the local one: pick it in setup and the model runs on your Mac, with no API key and nothing to sign up for.</p>
+
+      <h3>installing ollama</h3>
+      <p>Twin looks for either the <a href="https://ollama.com/download">Ollama.app</a> download in <code>/Applications</code>, or the <code>ollama</code> binary from a Homebrew install (<code>brew install ollama</code>), checking <code>/usr/local/bin</code> and <code>/opt/homebrew/bin</code> directly so it's found even when Twin is launched from Finder, which doesn't inherit your shell's <code>PATH</code>. Install either one before picking Ollama in setup.</p>
+
+      <h3>picking it in setup</h3>
+      <p>Select Ollama on the provider step. If it isn't already running, Twin starts it itself, either by opening the app or by launching <code>ollama serve</code> from the binary, and waits a few seconds for it to answer before moving on. Twin does the same automatic start on every later launch whenever Ollama is your saved provider, not just during setup.</p>
+      <p>If you have no models pulled yet, Twin recommends one sized to how much RAM your Mac has, shows its approximate size, and downloads it when you click Download. That download needs an internet connection; after it finishes, chat with that model runs fully on your Mac. Replies stream in as the model generates them, the same as typing to a cloud provider.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>your Mac's RAM</th><th>recommended model</th><th>approx. size</th></tr></thead>
+          <tbody>
+            <tr><td>Under 12 GB, or unknown</td><td><code>qwen2.5:3b</code></td><td>2.2 GB</td></tr>
+            <tr><td>12 GB or more</td><td><code>llama3.1:8b</code></td><td>5.3 GB</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>using a model you already have</h3>
+      <p>If you've already pulled models with Ollama, the setup window lists them as chips, click one to use it. You can also type the exact name of any model you've pulled yourself into the field. Twin only auto-downloads the one model it recommends; typing the name of a model that isn't pulled yet tells you to run <code>ollama pull &lt;model&gt;</code> in a terminal first.</p>
+
+      <h3>cancelling a download, and running out of space</h3>
+      <p>While a model downloads, a Cancel link sits next to the progress bar. Before starting, Twin also checks that your disk has enough free space for the model plus a small margin, and tells you the exact numbers instead of starting a download that can't finish. If space runs out mid-download instead, Ollama reports the problem and Twin shows the same "not enough free disk space" message.</p>
+
+      <h3>what stays on your mac</h3>
+      <p>There's no key to store for Ollama: nothing gets saved to the Keychain for it. The model itself lives wherever Ollama keeps its own models, outside <code>~/.twin</code>. Twin's <code>config.json</code> still records that you picked Ollama and which model, same as it would for any other provider.</p>
+      <p>Conversation summaries work the same way regardless of provider, but matter most here: ask something like "summarize my messages with Alex" and Twin asks once before turning this on at all. Once on, each request reads only the one named, one-to-one thread straight from Messages (group chats aren't included), up to the last 60 messages, and sends it to whichever provider you picked to write the summary. With Ollama, that never leaves your Mac. Either way, nothing from that thread is written to <code>twin.duckdb</code> or anywhere else on disk; it's read fresh every time you ask. This needs the same <a href="#permissions">Full Disk Access</a> as the rest of Messages reading.</p>
+
+      <h3>what still needs the internet</h3>
+      <p>Chat with Ollama runs fully on your Mac once a model is downloaded. A few other things don't go through your chosen provider at all, and still reach out regardless of whether you're on Ollama or a cloud provider: looking up an SEC filing talks to SEC EDGAR, flight search talks to its own flight data provider, and <code>/ingest</code>'s first run downloads the Donut OCR checkpoint from Hugging Face. All three need internet the same way they would with any provider.</p>
     </section>
 
     <section id="permissions">
@@ -522,11 +557,12 @@ python3 buddy.py</pre>
 
     <section id="providers">
       <h2>providers</h2>
-      <p>Four supported providers, one client each behind a common interface. Switch anytime with <code>/setup</code>.</p>
+      <p>Five supported providers, one client each behind a common interface. Switch anytime with <code>/setup</code>.</p>
       <div class="table-wrap">
         <table>
           <thead><tr><th>provider</th><th>get a key from</th></tr></thead>
           <tbody>
+            <tr><td>Ollama</td><td>local, no key, no account, see <a href="#ollama">running locally with Ollama</a></td></tr>
             <tr><td>Anthropic</td><td>console.anthropic.com/settings/keys</td></tr>
             <tr><td>OpenAI</td><td>platform.openai.com/api-keys</td></tr>
             <tr><td>Google Gemini</td><td>aistudio.google.com/apikey</td></tr>
@@ -534,7 +570,7 @@ python3 buddy.py</pre>
           </tbody>
         </table>
       </div>
-      <p>Keys are stored in the macOS Keychain as "Twin &lt;provider&gt; API key", never in a file on disk.</p>
+      <p>Keys for the four cloud providers are stored in the macOS Keychain as "Twin &lt;provider&gt; API key", never in a file on disk. Ollama has no key to store.</p>
     </section>
 
     <section id="your-data">
@@ -544,8 +580,9 @@ python3 buddy.py</pre>
         <li><code>~/.twin/twin.duckdb</code>: parsed transactions, the full raw SMS text, and anything loaded with <code>/ingest</code>.</li>
         <li><code>~/.twin/config.json</code>: your name, persona, provider, and setup state.</li>
       </ul>
-      <p>Your API key sits separately, in the macOS Keychain. There are no accounts, no sync, no analytics, and no Twin server. Everyone who installs Twin gets their own database, created in their own home folder.</p>
+      <p>Your API key sits separately, in the macOS Keychain, for the four cloud providers; Ollama has no key to store. There are no accounts, no sync, no analytics, and no Twin server. Everyone who installs Twin gets their own database, created in their own home folder.</p>
       <p>Every insert into <code>twin.duckdb</code> also writes a row to its <code>access_log</code> table, recording what was read, when, and by which part of Twin.</p>
+      <p>Conversation summaries ("summarize my messages with NAME") are the one exception that never touches this database: they're opt-in, and each one reads a single one-to-one Messages thread fresh at the time you ask, then sends it to your provider to write the summary. Nothing from that thread is written to <code>twin.duckdb</code>, <code>config.json</code>, or anywhere else on disk. See <a href="#ollama">running locally with Ollama</a> for the full behavior.</p>
 
       <h3>reset to a clean state</h3>
       <p>Delete <code>~/.twin</code> and Twin runs setup again on next launch, as if freshly installed:</p>
@@ -587,7 +624,19 @@ python3 buddy.py</pre>
         </details>
         <details class="faq-item">
           <summary>does anything leave my Mac?</summary>
-          <p>Only what you explicitly send: your chat message, your name, today's calendar titles, and a vague transaction summary go to whichever AI provider you picked. Voice, the digest, and nudges are all built and matched on-device and never touch a provider. There's no Twin server to send anything to in the first place.</p>
+          <p>Depends which provider you picked. With Ollama, chat stays on your Mac, nothing about the conversation leaves it. With a cloud provider, your chat message, your name, today's calendar titles, and a vague transaction summary go to whichever one you picked. Either way, voice, the digest, and nudges are all built and matched on-device and never touch a provider. There's no Twin server to send anything to in the first place.</p>
+        </details>
+        <details class="faq-item">
+          <summary>do I need Ollama running before setup?</summary>
+          <p>No. If it isn't running yet, Twin starts it for you when you pick it, either the app or the <code>ollama serve</code> binary, and waits a few seconds before moving on. You do need Ollama installed first; Twin can't install it for you.</p>
+        </details>
+        <details class="faq-item">
+          <summary>which model should I pick?</summary>
+          <p>If you're not sure, use the one Twin recommends: it's sized to how much RAM your Mac has, from <code>qwen2.5:3b</code> on machines under 12 GB of RAM up to <code>llama3.1:8b</code> on machines with more. If you already use Ollama for other things, any model you've pulled works too, just type its name.</p>
+        </details>
+        <details class="faq-item">
+          <summary>is it offline?</summary>
+          <p>Chat is, once the model is downloaded: that request goes to <code>localhost</code>, not out to the internet. SEC filing lookup, flight search, and <code>/ingest</code>'s one-time OCR model download still reach out to their own servers no matter which provider you picked, since none of those go through your AI provider at all.</p>
         </details>
       </div>
     </section>
@@ -609,6 +658,12 @@ python3 buddy.py</pre>
             <tr><td>Permissions stopped working after rebuilding</td><td>Each rebuild gets a new signature. Turn Twin back on in each Privacy &amp; Security list.</td></tr>
             <tr><td>Twin knows nothing about your spending</td><td>Check Full Disk Access, and make sure <code>TWIN_DB_PATH</code> (if set) matches for both the pipeline and Twin.</td></tr>
             <tr><td>Pipeline inserts 0 transactions</td><td>It only reads the last 200 messages, and only bank SMS in the supported formats count.</td></tr>
+            <tr><td>"Ollama isn't installed yet"</td><td>Install it from <a href="https://ollama.com/download">ollama.com/download</a>, or with <code>brew install ollama</code>, then pick Ollama again.</td></tr>
+            <tr><td>"Couldn't reach Ollama"</td><td>Open Ollama (or run <code>ollama serve</code>) yourself, then pick Ollama again. Twin tries to start it automatically first and only shows this if that didn't work.</td></tr>
+            <tr><td>"I don't have &lt;model&gt; installed yet"</td><td>Run <code>ollama pull &lt;model&gt;</code> in a terminal, or type <code>/setup</code> to pick a different model.</td></tr>
+            <tr><td>"Not enough free disk space for that model"</td><td>Free up space, or pick a smaller model. Twin checks before downloading and won't start one that can't finish.</td></tr>
+            <tr><td>"Downloading a model needs an internet connection"</td><td>The one-time model download needs internet. Reconnect and try again; chat runs offline once it's done.</td></tr>
+            <tr><td>Download cancelled</td><td>The download was cancelled with the Cancel link next to the progress bar. Click Download again to retry.</td></tr>
           </tbody>
         </table>
       </div>
@@ -624,6 +679,8 @@ python3 buddy.py</pre>
         <li>One ingested document is active at a time. Loading a new one with <code>/ingest</code> replaces it; older ones stay stored but out of the conversation until re-ingested.</li>
         <li>Filing lookup only searches EDGAR's "recent" filings window, roughly the last year. An older filing of that type comes back as not found even if it exists.</li>
         <li>Donut is fine-tuned on receipts, so extraction quality on other kinds of document photos is weaker.</li>
+        <li>Twin only auto-downloads the one model it recommends. A different model has to be pulled yourself with <code>ollama pull &lt;model&gt;</code> first.</li>
+        <li>SEC filing lookup, flight search, and <code>/ingest</code>'s one-time OCR model download all need internet, regardless of whether you picked Ollama or a cloud provider.</li>
         <li><code>Twin.app</code> ships ad-hoc signed, not signed with a paid Developer ID or notarized. That's a deliberate call for a portfolio project, not a gap to fill later.</li>
       </ul>
 

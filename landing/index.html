@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Twin</title>
-<meta name="description" content="Twin is a local-first AI buddy that floats on your Mac desktop: it remembers your day, catches you up on your texts, talks back by voice, and nudges you before you forget, all on-device with DuckDB. No cloud, no accounts.">
+<meta name="description" content="Twin is a local-first AI buddy that floats on your Mac desktop. Pick Ollama and chat runs fully on your Mac with no API key, or bring your own cloud provider. It remembers your day, catches you up on your texts, talks back by voice, and nudges you before you forget, all on-device with DuckDB.">
 <link id="favicon" rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cellipse cx='32' cy='33' rx='29' ry='27' fill='%23c6ff4a'/%3E%3Crect x='20' y='20' width='7' height='13' rx='3.5' fill='%23111'/%3E%3Crect x='37' y='20' width='7' height='13' rx='3.5' fill='%23111'/%3E%3Cellipse cx='15' cy='38' rx='5' ry='3' fill='%23ff7ab8'/%3E%3Cellipse cx='49' cy='38' rx='5' ry='3' fill='%23ff7ab8'/%3E%3Cpath d='M27 39 Q32 45 37 39' fill='none' stroke='%23111' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -40,6 +40,8 @@ a { color: inherit; }
   padding: 60px 0 90px;
 }
 
+.badge-row { display: flex; flex-wrap: wrap; gap: 10px; }
+
 .badge {
   display: inline-flex;
   align-items: center;
@@ -53,6 +55,13 @@ a { color: inherit; }
   border-radius: 999px;
   transform: rotate(-1.5deg);
   margin-bottom: 22px;
+}
+
+.badge-local {
+  background: #c6ff4a1a;
+  color: var(--lime);
+  border: 1px dashed #c6ff4a66;
+  transform: rotate(1deg);
 }
 
 h1 {
@@ -1106,9 +1115,12 @@ h2 {
 
   <header class="hero">
     <div>
-      <span class="badge">✨ v1.5.0 is here</span>
-      <h1>a tiny buddy that lives on your <span class="squiggle">Mac.</span></h1>
-      <p class="tagline">Twin floats on your desktop, knows roughly what you've been up to, and <b>keeps all of it on your machine.</b></p>
+      <div class="badge-row">
+        <span class="badge">✨ v1.5.0 is here</span>
+        <span class="badge badge-local">🦙 runs fully local with ollama</span>
+      </div>
+      <h1>a tiny buddy that lives on your <span class="squiggle">Mac.</span> brain included.</h1>
+      <p class="tagline">Twin can run entirely on your Mac with Ollama, no API key needed, and <b>no AI provider ever sees your chats.</b></p>
       <div class="cta-row">
         <a class="btn btn-primary" href="#get">download for mac ↓</a>
         <a class="btn btn-ghost" href="https://github.com/woustachemax/twin">read the source</a>
@@ -1143,6 +1155,37 @@ h2 {
   </header>
 </div>
 
+<section id="local">
+  <div class="wrap">
+    <p class="eyebrow">running fully local</p>
+    <h2>no key. no cloud. just your mac.</h2>
+    <p class="lede">Pick Ollama in setup and Twin runs the whole conversation on your Mac. It starts Ollama for you, downloads a model sized to your Mac's RAM the first time, and streams replies back as they generate. Chat runs fully on your Mac from there.</p>
+
+    <div class="flow" style="max-width: 640px; margin-top: 24px;">
+      <div class="flow-row">
+        <div class="flow-icon" style="background:#c6ff4a22">🦙</div>
+        <div class="label">pick Ollama during setup, skip the API key</div>
+        <span class="tag stay">no key</span>
+      </div>
+      <div class="flow-row">
+        <div class="flow-icon" style="background:#7ad7ff22">⚡</div>
+        <div class="label">Twin starts Ollama for you if it's installed</div>
+        <span class="tag stay">automatic</span>
+      </div>
+      <div class="flow-row">
+        <div class="flow-icon" style="background:#ffd35c22">📦</div>
+        <div class="label">no models yet? Twin downloads one sized to your RAM</div>
+        <span class="tag go">needs internet once</span>
+      </div>
+      <div class="flow-row">
+        <div class="flow-icon" style="background:#ff7ab822">💬</div>
+        <div class="label">chat runs fully on your Mac, streamed as it generates</div>
+        <span class="tag stay">local only</span>
+      </div>
+    </div>
+  </div>
+</section>
+
 <section id="day">
   <div class="wrap local-grid">
     <div>
@@ -1150,7 +1193,7 @@ h2 {
       <h2>you've met the other kind of assistant.</h2>
       <p class="lede">The kind that needs your calendar and texts to be useful, then ships all of it to a server you'll never see. Twin skips that trade, keeping everything in a DuckDB file at <code>~/.twin/twin.duckdb</code>, right on your Mac. No accounts, no sync, no cloud database. Here's an ordinary Tuesday with it, and exactly what does or doesn't leave your laptop.</p>
       <p class="lede yours">Everyone who installs Twin gets <b>their own brand-new twin.duckdb</b>, created on their Mac the first time they run it. Nothing is shared, synced, or pooled between users, and the database itself never leaves your machine.</p>
-      <p class="fineprint">Voice, the digest and nudges never touch an AI provider at all, they're built and matched entirely on your Mac. When you chat, one request goes to the provider you picked with your message, your name, the current time, today's event titles, and a fuzzy summary like "spent money on food earlier this week". Amounts, balances, account numbers and raw SMS never leave.</p>
+      <p class="fineprint">Voice, the digest and nudges never touch an AI provider at all, they're built and matched entirely on your Mac. Chat with Ollama and that stays true too: no AI provider ever sees the conversation, since the model runs on your Mac. Pick a cloud provider instead, and one request goes out with your message, your name, the current time, today's event titles, and a fuzzy summary like "spent money on food earlier this week". Amounts, balances, account numbers and raw SMS never leave, either way. Live lookups you ask for, like flight search or an SEC filing, still reach their own service online no matter which provider you picked.</p>
     </div>
 
     <div class="flow">
@@ -1183,6 +1226,11 @@ h2 {
         <div class="flow-icon" style="background:#ffd35c22">🫧</div>
         <div class="label">fuzzy summary · "got paid yesterday," not "$1,240"</div>
         <span class="tag stay">built locally</span>
+      </div>
+      <div class="flow-row">
+        <div class="flow-icon" style="background:#c6ff4a22">🦙</div>
+        <div class="label">picked Ollama instead? no AI provider ever sees your chats</div>
+        <span class="tag stay">never sent</span>
       </div>
       <div class="flow-row">
         <div class="flow-icon" style="background:#7ad7ff22">💬</div>
@@ -1357,7 +1405,7 @@ h2 {
           </svg>
         </div>
         <h3>bring your own AI</h3>
-        <p>Claude, GPT, Gemini or Grok. Paste a key from whichever you like and Twin talks to it directly. Your key lives in the macOS Keychain, not in some file. Or skip keys entirely and pick Ollama: Twin starts it and pulls a recommended model for you, then chat runs fully on your Mac.</p>
+        <p>Ollama is the local option: pick it and chat runs fully on your Mac, no key, Twin starts it and downloads a model sized to your RAM for you. Prefer the cloud? Claude, GPT, Gemini or Grok all work too. Paste a key from whichever you like and Twin talks to it directly. Your key lives in the macOS Keychain, not in some file.</p>
       </div>
     </div>
   </div>
@@ -1609,7 +1657,7 @@ h2 {
       <div class="step">
         <span class="step-num">03</span>
         <h3>set it up in the bubble</h3>
-        <p>Pick your AI provider, paste your API key (it goes straight into your Keychain), tell Twin your name, and pick a buddy. Done.</p>
+        <p>Pick your AI provider: Ollama for fully local with no key, or paste a key for one of the four cloud providers (it goes straight into your Keychain). Tell Twin your name, and pick a buddy. Done.</p>
       </div>
     </div>
 
@@ -1637,7 +1685,7 @@ h2 {
       </div>
     </div>
 
-    <p class="need">You'll need an API key from <b>Anthropic</b>, <b>OpenAI</b>, <b>Google Gemini</b> or <b>xAI</b>, or pick <b>Ollama</b> and skip keys entirely: Twin starts it and downloads a model for you, no account required. Twin sends your chats straight to whichever you pick. Skip any permission and Twin still works, it just knows a little less.</p>
+    <p class="need">Pick <b>Ollama</b> for fully local with no key, or paste a key from one of the four cloud providers: <b>Anthropic</b>, <b>OpenAI</b>, <b>Google Gemini</b>, or <b>xAI</b>. With Ollama, chat never leaves your Mac; with a cloud provider, Twin sends your chats straight to it. Skip any permission and Twin still works, it just knows a little less.</p>
   </div>
 </section>
 
