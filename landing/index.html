@@ -430,6 +430,8 @@ h2 {
   font-size: 13px;
 }
 
+.flow-narrow { max-width: 640px; margin-top: 24px; }
+
 .flow-row {
   display: flex;
   align-items: center;
@@ -1156,7 +1158,7 @@ h2 {
     <h2>no key. no cloud. just your mac.</h2>
     <p class="lede">Pick Ollama in setup and Twin runs the whole conversation on your Mac. It starts Ollama for you, downloads a model sized to your Mac's RAM the first time, and streams replies back as they generate. Chat runs fully on your Mac from there.</p>
 
-    <div class="flow" style="max-width: 640px; margin-top: 24px;">
+    <div class="flow flow-narrow">
       <div class="flow-row">
         <div class="flow-icon" style="background:#c6ff4a22">🦙</div>
         <div class="label">pick Ollama during setup, skip the API key</div>
@@ -1400,7 +1402,7 @@ h2 {
           </svg>
         </div>
         <h3>bring your own AI</h3>
-        <p>Ollama is the local option: pick it and chat runs fully on your Mac, no key, Twin starts it and downloads a model sized to your RAM for you. Prefer the cloud? Claude, GPT, Gemini or Grok all work too. Paste a key from whichever you like and Twin talks to it directly. Your key lives in the macOS Keychain, not in some file.</p>
+        <p>Ollama first: pick it and chat runs fully on your Mac, no key needed. Prefer the cloud? Claude, GPT, Gemini or Grok all work too, your key lives in the macOS Keychain, not in some file.</p>
       </div>
     </div>
   </div>
@@ -1652,7 +1654,7 @@ h2 {
       <div class="step">
         <span class="step-num">03</span>
         <h3>set it up in the bubble</h3>
-        <p>Pick your AI provider: Ollama for fully local with no key, or paste a key for one of the four cloud providers (it goes straight into your Keychain). Tell Twin your name, and pick a buddy. Done.</p>
+        <p>Pick your AI provider: Ollama for no key, or paste a key for one of the four cloud providers (it goes into your Keychain). Tell Twin your name, and pick a buddy. Done.</p>
       </div>
     </div>
 
