@@ -203,7 +203,7 @@ def http_failure_kind(status, text):
 
 
 def ollama_installed_models():
-    request = urllib.request.Request(OLLAMA_TAGS_URL, headers={"User-Agent": "Twin/0.1"})
+    request = urllib.request.Request(OLLAMA_TAGS_URL, headers={"User-Agent": "Twin/1.5.0"})
     try:
         with urllib.request.urlopen(request, timeout=5) as response:
             data = json.loads(response.read().decode("utf-8"))
@@ -345,7 +345,7 @@ def json_request(url, api_key, body):
         url,
         data=json.dumps(body).encode("utf-8"),
         method="POST",
-        headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}", "User-Agent": "Twin/0.1"},
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}", "User-Agent": "Twin/1.5.0"},
     )
 
 

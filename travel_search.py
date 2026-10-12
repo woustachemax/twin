@@ -99,7 +99,7 @@ def _headers(key):
         "Duffel-Version": DUFFEL_VERSION,
         "Accept": "application/json",
         "Content-Type": "application/json",
-        "User-Agent": "Twin/0.1",
+        "User-Agent": "Twin/1.5.0",
     }
 
 

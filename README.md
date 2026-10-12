@@ -4,7 +4,7 @@ A small, local-first AI buddy that lives on your Mac.
 
 [![Twin demo](https://twin.siddharththakkar.xyz/demo/poster.png)](https://twin.siddharththakkar.xyz/demo/demo.mp4)
 
-Twin floats on your desktop in a small widget, shows and hides with a global hotkey (`Cmd+Shift+Space`), and chats with you in one of five personas. It builds a rough picture of your day from your own Mac, reading bank SMS that arrive through Messages and events from your calendars, and keeps that data in a DuckDB file on your machine. Twin has no server of its own. When you chat, one request goes directly to the AI provider you picked (Anthropic, OpenAI, Google Gemini, or xAI), and that request is scrubbed before it leaves.
+Twin floats on your desktop in a small widget, shows and hides with a global hotkey (`Cmd+Shift+Space`), and chats with you in one of five personas. It builds a rough picture of your day from your own Mac, reading bank SMS that arrive through Messages and events from your calendars, and keeps that data in a DuckDB file on your machine. Twin has no server of its own. When you chat, one request goes directly to the AI provider you picked (Anthropic, OpenAI, Google Gemini, xAI, or Ollama running fully on your Mac), and that request is scrubbed before it leaves.
 
 This started as a hackathon project. It's about 3,500 lines of Python and meant for anyone to install and change.
 
@@ -48,7 +48,7 @@ This started as a hackathon project. It's about 3,500 lines of Python and meant 
                             |
                             |  scrubbed request only
                             v
-          the provider you picked (Anthropic, OpenAI, Google Gemini, or xAI)
+    the provider you picked (Anthropic, OpenAI, Google Gemini, xAI, or Ollama, local)
 ```
 
 1. **Ingest.** Every time Twin starts, it runs the pipeline in `run_pipeline.py`: copy your Messages database to a temp folder, read the last 200 messages, and delete the copy. You can also run the pipeline by hand.
@@ -81,12 +81,14 @@ Filing lookup and document ingestion follow a separate path:
                                   |
                           scrubbed request only
                                   v
-           the provider you picked (Anthropic, OpenAI, Google Gemini, or xAI)
+     the provider you picked (Anthropic, OpenAI, Google Gemini, xAI, or Ollama, local)
 ```
 
 8. **Filing lookup.** Ask something like "Tesla's last 10-K" or "summarize Apple's most recent 8-K" and `research_search.py` resolves the company name or ticker, fetches the filing from EDGAR, and selects an excerpt from the section the question needs. The excerpt is a public company disclosure, so `scrub_system()` passes it through unscrubbed. Every request needs a contact string, set through `SEC_EDGAR_CONTACT` or `/setup edgar`. Without one, Twin asks for a contact instead of looking anything up.
 
 9. **Document ingestion.** `/ingest <path>` reads a PDF or a JPG/PNG photo with `document_ingest.py`, stores the full extracted text in the `documents` table in `~/.twin/twin.duckdb`, and keeps a truncated excerpt active for chat until `/forget` or the next `/ingest` replaces it. A document is your own data, so `redact.py`'s categories run on it before anything reaches your provider. The currency, account number, and generic number patterns built for bank SMS text are skipped for this excerpt specifically, so a receipt's total or a document's date reaches your provider as a real value.
+
+10. **Message summaries.** Ask something like "summarize my messages with Alex" and Twin offers to turn this on, since it's opt-in and off until you say yes. Once on, `packages/ingest/conversation_reader.py` reads only the one thread you named, straight from Messages, and your provider writes the summary. Nothing from the conversation is written to `twin.duckdb` or anywhere else on disk, and the next summary request reads the thread fresh.
 
 ## Repository layout
 
@@ -110,7 +112,8 @@ digital-twin/
 │   │   ├── digest.py           counts today's messages by vague topic for the catch-up summary
 │   │   ├── nudges.py           matches upcoming events to recent messages, returns only a vague cue
 │   │   ├── calendar_reader.py  reads today's and tomorrow's events through EventKit
-│   │   └── screen_reader.py    one screenshot, on-device text recognition, deleted right after
+│   │   ├── screen_reader.py    one screenshot, on-device text recognition, deleted right after
+│   │   └── conversation_reader.py  reads one named Messages thread for an opt-in summary, never stored
 │   ├── parse/
 │   │   └── sms_parser.py       regex parser for bank transaction SMS (Rs / INR, UPI)
 │   ├── db/
@@ -144,8 +147,9 @@ Your API key is not in either folder. It's stored in your macOS Keychain.
 
 - **macOS.** Twin reads the Messages database, reads your calendars through EventKit, and uses AppKit for the translucent window. It won't work on Linux or Windows.
 - **Python 3 with Tk.** Developed on Python 3.12 with Tk 9. The python.org installer includes Tk. With Homebrew, also run `brew install python-tk`.
-- **An API key** from one of the [supported providers](#ai-providers). You paste it into the setup window on first run.
+- **An API key** from one of the [supported providers](#ai-providers), or pick **Ollama** and skip the key: Twin starts Ollama itself and, on first run, offers to download a model sized to your Mac. You paste a key (or confirm the Ollama download) in the setup window on first run.
 - **Internet access for the Donut model, once.** The first time you run `/ingest` on an image or a scanned PDF page, Twin downloads an 800 MB checkpoint from Hugging Face to `~/.cache/huggingface`. Every call after that loads from the local cache.
+- **Internet access to download Ollama's model, once.** After that model is pulled, chat with Ollama works fully offline. Filing lookup and flight search still reach out to SEC EDGAR and the flight provider directly, regardless of which AI provider you chat with, so those two features still need internet.
 - **A contact for SEC EDGAR, only for filing lookup.** Set `SEC_EDGAR_CONTACT`, or Twin asks for one the first time you look up a filing and saves it to `config["edgar_contact"]`.
 - **`/ingest` needs a source install, not the downloadable app.** `document_ingest.py`'s dependencies (`pypdfium2`, `torch`, `transformers`, `sentencepiece`, `protobuf`, `Pillow`) aren't bundled into `Twin.app` or the `.dmg`: installing them, plus everything they transitively pull in, would take the app from about 150 MB to nearly 1 GB for a feature most people won't use. `buddy.py` imports `document_ingest` lazily, so the packaged app launches and runs normally either way; typing `/ingest` in it just explains that it needs a source install with those packages (see [Installation](#installation)). Everything else in this README works the same in both the packaged app and a source install.
 
@@ -248,6 +252,8 @@ Or skip that with `xattr -cr /Applications/Twin.app` in Terminal after dragging 
 
 Either way you install it, this build doesn't include `/ingest` (receipt and document OCR); see [Requirements](#requirements) for why and how to get it via a source install.
 
+**Upgrading from an earlier version:** since `Twin.app` is ad-hoc signed, every build gets its own signature, so macOS treats a new version as a different app for permissions. If Twin stops reading your Messages after an upgrade, open **System Settings → Privacy & Security → Full Disk Access**, remove Twin from the list, then add it back; just toggling it off and on isn't enough. Do the same for Accessibility or Screen Recording if those feel stuck too.
+
 ## First run
 
 The first time Twin starts (or any time `~/.twin/config.json` is missing or setup wasn't finished), it opens a setup window before the chat widget. It has four steps and a summary:
@@ -271,6 +277,7 @@ Closing the window before finishing quits Twin, and it starts from step 1 next t
 | Switch persona | `/persona <key>`, for example `/persona gengar` |
 | Change provider or key | `/setup` |
 | Catch up on today's Messages | "what did I miss?", "catch me up" |
+| Summarize a Messages thread (opt-in, asks the first time) | "summarize my messages with Alex" |
 | Ask about your screen | "what am I looking at?", "what's on my screen?" |
 | Look up an SEC filing | "Tesla's last 10-K", "summarize Apple's most recent 8-K" |
 | Read a document | `/ingest <path>`, for example `/ingest ~/Downloads/receipt.jpg` |
@@ -297,6 +304,7 @@ You'll see something like `Inserted 12 transactions (3 duplicates skipped)`. It 
 | OpenAI | `gpt-6-luna` (reasoning off, storage off) | Responses API | platform.openai.com/api-keys |
 | Google Gemini | `gemini-3.5-flash-lite` (thinking set to minimal) | OpenAI-compatible Chat Completions | aistudio.google.com/apikey |
 | xAI | `grok-4.3` | Responses API | console.x.ai |
+| Ollama | `llama3.2:1b`, or whatever Twin recommends for your Mac's RAM | OpenAI-compatible Chat Completions, local | no key, runs on your Mac |
 
 Keys are stored in the macOS Keychain as "Twin &lt;provider&gt; API key". To remove one:
 
@@ -305,6 +313,10 @@ security delete-generic-password -s "Twin Anthropic API key"
 ```
 
 To use a different model, set `"model"` in `~/.twin/config.json` or the `TWIN_MODEL` environment variable.
+
+### Running fully on-device with Ollama
+
+Pick Ollama in setup and Twin starts it for you (`open -a Ollama`, or `ollama serve` if you installed it with Homebrew). If you don't have any models yet, Twin recommends one sized to your Mac's RAM and downloads it with one click; that download needs internet. After that, chatting with Ollama makes no network request at all. Filing lookup still talks to SEC EDGAR and flight search still talks to its own provider, since those reach out directly and don't go through whichever AI provider you picked, so both still need internet even on Ollama.
 
 ## Personas
 
@@ -387,6 +399,9 @@ Each chat message makes one request to the provider you picked, containing:
 - when you ask about your screen, one sentence describing it, such as "They're in Mail, looking at what seems to be an email inbox."
 - when you look up a filing, an excerpt from the filing itself, up to 16,000 characters, unredacted
 - when a document is active, an excerpt of what `/ingest` extracted, up to 20,000 characters, redacted first
+- when you ask for a Messages conversation summary and have turned that on, the full text of the one thread you named
+
+Message summaries are off until you turn them on: the first time you ask for one, Twin explains what it's about to read and waits for a yes before it reads anything. Once on, each summary request reads only the single named thread fresh from Messages and sends it to your provider to write the summary; none of that conversation text is written to `twin.duckdb`, `config.json`, or anywhere else on disk.
 
 Nudges are built and shown entirely on your Mac and are never sent anywhere. They contain the event title (scrubbed like any other) and one of four fixed phrases, never message text. Which nudges were shown is kept in `~/.twin/nudged.json` as hashes so the same one isn't repeated.
 
@@ -495,7 +510,7 @@ Load a file and ask about it in the widget:
 
 ### `llm_providers.py`
 
-One client per provider behind a common `complete()` method. Anthropic uses the official SDK. OpenAI and xAI use the Responses API, and Gemini uses its OpenAI-compatible Chat Completions endpoint, all over plain HTTPS. It also checks keys, maps provider errors (bad key, rate limit, offline, server error) to plain messages, and stores keys in the Keychain.
+One client per provider behind a common `complete()` method, with a streaming `complete_stream()` for the chat-style providers. Anthropic uses the official SDK. OpenAI and xAI use the Responses API, and Gemini and Ollama use the OpenAI-compatible Chat Completions endpoint, Gemini over plain HTTPS and Ollama against `localhost:11434`. For Ollama, `start_ollama()` launches it if it isn't already running (checking `/Applications/Ollama.app` and, when launched without a shell `PATH`, `/usr/local/bin` and `/opt/homebrew/bin` directly for a Homebrew install), and `pull_model()` downloads a model with progress callbacks. It also checks keys, maps provider errors (bad key, rate limit, offline, server error, not installed) to plain messages, and stores keys in the Keychain.
 
 ### `redact.py`
 
@@ -584,6 +599,7 @@ It covers the pitch, the "why local" explanation, an animated features grid, per
 | "I can only add calendar events right now" | Twin has add-only access. Switch it to Full Access under Privacy & Security > Calendars. |
 | Twin can't see your screen | Allow Twin (or your terminal) under Screen & System Audio Recording. |
 | Permissions stopped working after rebuilding the app | Each rebuild gets a new signature. Turn Twin back on in each Privacy & Security list. |
+| Twin can't read Messages after upgrading to a new release | Ad-hoc signed builds get a new signature per version. Remove Twin from Full Disk Access, then add it back, instead of just toggling it. |
 | Twin knows nothing about your spending | Check Full Disk Access, and make sure `TWIN_DB_PATH` (if set) is the same for the pipeline and for Twin. |
 | `ModuleNotFoundError: No module named '_tkinter'` | Install a Python with Tk (python.org installer, or `brew install python-tk`). |
 | Plain opaque window instead of a translucent one | Install `pyobjc-framework-Cocoa` and `pyobjc-framework-Quartz`. |
