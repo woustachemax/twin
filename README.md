@@ -304,7 +304,7 @@ You'll see something like `Inserted 12 transactions (3 duplicates skipped)`. It 
 | OpenAI | `gpt-6-luna` (reasoning off, storage off) | Responses API | platform.openai.com/api-keys |
 | Google Gemini | `gemini-3.5-flash-lite` (thinking set to minimal) | OpenAI-compatible Chat Completions | aistudio.google.com/apikey |
 | xAI | `grok-4.3` | Responses API | console.x.ai |
-| Ollama | `llama3.2:1b`, or whatever Twin recommends for your Mac's RAM | OpenAI-compatible Chat Completions, local | no key, runs on your Mac |
+| Ollama | `qwen2.5:3b` under 12 GB of RAM, `llama3.1:8b` at or above it | OpenAI-compatible Chat Completions, local | no key, runs on your Mac |
 
 Keys are stored in the macOS Keychain as "Twin &lt;provider&gt; API key". To remove one:
 
